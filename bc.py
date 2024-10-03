@@ -1,5 +1,4 @@
 import bc_util
-
 import LRU_tf as lru
 
 #from tf_seq2seq_losses import classic_ctc_loss
@@ -10,17 +9,23 @@ import tensorflow as tf
 
 #import logging
 #import warnings
-
 # Suppress warnings
 #logger = tf.get_logger()
 #logger.setLevel(logging.ERROR)
 #os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 #warnings.filterwarnings("ignore")
-
 #tf.debugging.set_log_device_placement(True)
 
 # Print available GPUs
 print("GPU:", tf.config.list_physical_devices('GPU'))
+# Enable memory growth
+gpus = tf.config.list_physical_devices('GPU')
+if gpus:
+    try:
+        for gpu in gpus:
+            tf.config.experimental.set_memory_growth(gpu, True)
+    except RuntimeError as e:
+        print(e)
 
 # Fully print arrays with lengths up to 514
 np.set_printoptions(threshold=514)
@@ -48,38 +53,21 @@ pi = 3.14
 # The model structure
 def build_model():
     inputs = tf.keras.Input(shape=(CHUNK_LENGTH, 1))  # Input shape is (5000, 1) for sensor readings
-    #x = tf.keras.layers.Conv1D(32, kernel_size=1, padding='same')(inputs)
-    #x = tf.keras.layers.Conv1D(16, kernel_size=5, activation='swish', padding='same')(inputs)
-    #x = tf.keras.layers.BatchNormalization()(x)
-    #x = tf.keras.layers.Conv1D(16, kernel_size=5, activation='swish', padding='same')(x)
-    #x = tf.keras.layers.BatchNormalization()(x)
-    #x = tf.keras.layers.Conv1D(256, kernel_size=19, strides=1, activation='tanh', padding='same')(x)
-    #x = tf.keras.layers.BatchNormalization()(x)
-    #x = tf.keras.layers.Bidirectional(tf.keras.layers.LSTM(512, return_sequences=True))(x)
-    #x = tf.keras.layers.Bidirectional(tf.keras.layers.LSTM(512, return_sequences=True))(x)
-    #x = tf.keras.layers.Bidirectional(tf.keras.layers.LSTM(512, return_sequences=True))(x)
-    #x = tf.keras.layers.Bidirectional(tf.keras.layers.LSTM(512, return_sequences=True))(x)
+    
     #x = tf.keras.layers.Bidirectional(tf.keras.layers.LSTM(512, return_sequences=True))(x)
     #x = tf.keras.layers.Dense(2048)(x)
     #x = tf.keras.layers.Lambda(lambda x: tf.clip_by_value(x, -5, 5))(x)
     #x = lru.LRU_Block(N=256, H=256, bidirectional=True, max_phase=2*pi/10)(x)
-    #x = lru.LRU_Block(N=256, H=256, bidirectional=True, max_phase=2*pi/10)(x)
-    #x = lru.LRU_Block(N=256, H=256, bidirectional=True, max_phase=2*pi/10)(x)
-    #x = lru.LRU_Block(N=256, H=256, bidirectional=True, max_phase=2*pi/10)(x)
-    #x = lru.LRU_Block(N=256, H=256, bidirectional=True, max_phase=2*pi/10)(x)
-    #x = tf.keras.layers.Dense(1024)(x)
     
     x = tf.keras.layers.Conv1D(16, kernel_size=5, activation='swish', padding='same')(inputs)
     x = tf.keras.layers.BatchNormalization()(x)
-    x = tf.keras.layers.Conv1D(16, kernel_size=5, activation='swish', padding='same')(inputs)
+    x = tf.keras.layers.Conv1D(32, kernel_size=5, activation='swish', padding='same')(x)
     x = tf.keras.layers.BatchNormalization()(x)
-    x = tf.keras.layers.Conv1D(1024, kernel_size=19, strides=6, activation='tanh', padding='same')(x)
+    x = tf.keras.layers.Conv1D(128, kernel_size=19, strides=6, activation='tanh', padding='same')(x)
     x = tf.keras.layers.BatchNormalization()(x)
-    x = lru.LRU_Block(N=64, H=512, bidirectional=True, max_phase=2*pi)(x)
-    x = lru.LRU_Block(N=64, H=512, bidirectional=True, max_phase=2*pi)(x)
-    x = lru.LRU_Block(N=64, H=512, bidirectional=True, max_phase=2*pi)(x)
-    x = lru.LRU_Block(N=64, H=512, bidirectional=True, max_phase=2*pi)(x)
-    x = lru.LRU_Block(N=64, H=512, bidirectional=True, max_phase=2*pi)(x)
+    x = lru.LRU_Block(N=64, H=256, bidirectional=True, max_phase=2*pi)(x)
+    x = lru.LRU_Block(N=64, H=256, bidirectional=True, max_phase=2*pi)(x)
+    x = lru.LRU_Block(N=64, H=256, bidirectional=True, max_phase=2*pi)(x)
     
     # Output layer - logits for each time step
     classes = tf.keras.layers.Dense(NUM_CLASSES)(x)
@@ -106,7 +94,6 @@ class CTCModel(tf.keras.Model):
         chunks, targets, target_lengths = data
         # For some reason the target_lengths in the train dataset are offset by 7
         target_lengths = target_lengths + 7
-        
         #targets = tf.sparse.to_dense(targets)
         
         with tf.GradientTape() as tape:
@@ -117,8 +104,9 @@ class CTCModel(tf.keras.Model):
             # Compute CTC loss
             loss = tf.reduce_mean(tf.nn.ctc_loss(labels=targets, logits=logits, label_length=target_lengths, logit_length=input_lengths, logits_time_major=True, blank_index=0))
             
+            # Classic implementation
             #loss = tf.reduce_mean(classic_ctc_loss(labels=targets, logits=logits, label_length=target_lengths, logit_length=input_lengths, blank_index=0,))
-            
+            # Implementation from tf 1.
             #loss = tf.reduce_mean(tf.compat.v1.nn.ctc_loss(labels=targets, inputs=logits, sequence_length=input_lengths, time_major=True))
         
         # Compute gradients
@@ -152,7 +140,6 @@ class CTCModel(tf.keras.Model):
         chunks, targets, target_lengths = data
         # For some reason the target_lengths in the train dataset are offset by 7
         target_lengths = target_lengths + 7
-        
         #targets = tf.sparse.to_dense(targets)
         
         logits = self(chunks, training=False)
@@ -217,8 +204,6 @@ class CustomMetricsCallback(tf.keras.callbacks.Callback):
         input_lengths = np.ones(logits.shape[0]) * logits.shape[1]
         
         # Decode the predictions
-        #decoded_sequences = tf.keras.backend.ctc_decode(logits, input_length=input_lengths, greedy=False, beam_width=128)[0][0]
-        
         decoded_sequences = tf.keras.ops.ctc_decode(logits, sequence_lengths=input_lengths, strategy="beam_search", beam_width=1024)
         decoded_sequences = tf.cast(decoded_sequences[0][0], tf.int32)
         
@@ -236,19 +221,12 @@ class CustomMetricsCallback(tf.keras.callbacks.Callback):
             return arr[:indices[0]]
 
 
-#model.compile(optimizer=tf.keras.optimizers.AdamW(learning_rate=bc_util.get_learning_rate(epochs=EPOCHS, steps_per_epoch=STEPS_PER_EPOCH), weight_decay=1e-4, clipnorm=1.0))
-#model.compile(optimizer=tf.keras.optimizers.SGD(learning_rate=bc_util.CosineDecaySchedule(initial_lr=0.005, final_lr=1e-8, decay_steps=EPOCHS*STEPS_PER_EPOCH), momentum=0.9))
-#model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=1e-4))
-
-#optimizer = tf.keras.optimizers.AdamW(learning_rate=tf.keras.optimizers.schedules.CosineDecay(initial_learning_rate=1e-8, decay_steps=EPOCHS*STEPS_PER_EPOCH, warmup_target=1e-4, warmup_steps=10000))
-
-optimizer = tf.keras.optimizers.AdamW(learning_rate=tf.keras.optimizers.schedules.CosineDecayRestarts(initial_learning_rate=1e-3, first_decay_steps=8000, t_mul=1.2, m_mul=0.9, alpha=0), weight_decay=0)
-
-#optimizer = tf.keras.optimizers.AdamW(learning_rate=1e-7)
-
-#reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor='loss', factor=0.5, patience=10, min_lr=1e-18)
-
 with tf.device('/GPU:0'):
+
+    #reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor='loss', factor=0.5, patience=10, min_lr=1e-18)
+    
+    optimizer = tf.keras.optimizers.AdamW(learning_rate=tf.keras.optimizers.schedules.CosineDecayRestarts(initial_learning_rate=2e-4, first_decay_steps=32000, t_mul=1.5, m_mul=0.95, alpha=1e-8), weight_decay=0.0005, clipnorm=1.0)
+    
     # Initialize the model and optimizer
     model = CTCModel()
     model.compile(optimizer=optimizer)
@@ -256,8 +234,8 @@ with tf.device('/GPU:0'):
     model.summary()
     
     # Read in the dataset
-    train_dataset = bc_util.load_tfrecords(directory + "train_data.tfrecord", batch_size=BATCH_SIZE, shuffle=True)
-    valid_dataset = bc_util.load_tfrecords(directory + "valid_data.tfrecord", batch_size=BATCH_SIZE, shuffle=False)
+    train_dataset = bc_util.load_tfrecords(directory + "train_data.tfrecord", batch_size=BATCH_SIZE, shuffle=True, repeat=True)
+    valid_dataset = bc_util.load_tfrecords(directory + "valid_data.tfrecord", batch_size=BATCH_SIZE, shuffle=False, repeat=False)
     
     # Fit the model using the dataset
     model.fit(train_dataset, shuffle=False, validation_data=valid_dataset, epochs=EPOCHS, steps_per_epoch=STEPS_PER_EPOCH, validation_steps=1, callbacks=[CustomMetricsCallback(valid_dataset)])

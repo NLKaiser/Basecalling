@@ -36,13 +36,17 @@ def _parse_function(proto):
     
     return chunk, reference, reference_length
 
-def load_tfrecords(tfrecord_file_path, batch_size=32, shuffle=False):
+def load_tfrecords(tfrecord_file_path, batch_size=32, shuffle=False, repeat=False):
     # Create a dataset from the TFRecord file
     dataset = tf.data.TFRecordDataset(tfrecord_file_path)
     
     if shuffle:
         # Shuffle the dataset
         dataset = dataset.shuffle(4096)
+    
+    if repeat:
+        # Repeat dataset indefinitely
+        dataset = dataset.repeat()
     
     # Map the parsing function over the dataset
     dataset = dataset.map(_parse_function, num_parallel_calls=tf.data.experimental.AUTOTUNE)
