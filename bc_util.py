@@ -19,10 +19,10 @@ def _parse_function(proto):
     
     # Parse the input tf.Example proto using the dictionary
     parsed_features = tf.io.parse_single_example(proto, feature_description)
-
+    
     # Extract indices and reshape them to [num_non_zero_elements, 1] for sparse tensor
     reference_indices = tf.reshape(parsed_features['reference_indices'].values, [-1, 1])
-
+    
     # Reconstruct the sparse tensor for reference
     reference = tf.SparseTensor(
         indices=tf.cast(reference_indices, tf.int64),  # Reshaped indices for the sparse tensor
@@ -30,9 +30,12 @@ def _parse_function(proto):
         dense_shape=tf.cast(parsed_features['reference_dense_shape'], tf.int64)  # Dense shape of the tensor
     )
     
+    #reference = tf.sparse.to_dense(reference)
+    
     # Convert chunk and reference_length as they are
     chunk = tf.cast(parsed_features['chunk'], tf.float32)
-    reference_length = tf.cast(parsed_features['reference_length'], tf.int32)
+    # For some reason the target_lengths in the train dataset are offset by 7!
+    reference_length = tf.cast(parsed_features['reference_length'], tf.int16)# + 7
     
     return chunk, reference, reference_length
 
@@ -42,7 +45,7 @@ def load_tfrecords(tfrecord_file_path, batch_size=32, shuffle=False, repeat=Fals
     
     if shuffle:
         # Shuffle the dataset
-        dataset = dataset.shuffle(4096)
+        dataset = dataset.shuffle(1024)
     
     if repeat:
         # Repeat dataset indefinitely
@@ -50,6 +53,12 @@ def load_tfrecords(tfrecord_file_path, batch_size=32, shuffle=False, repeat=Fals
     
     # Map the parsing function over the dataset
     dataset = dataset.map(_parse_function, num_parallel_calls=tf.data.experimental.AUTOTUNE)
+    
+    # Return individual elements for unpacking
+    def unpack_data(chunks, targets, reference_length):
+        return chunks, targets, reference_length
+
+    dataset = dataset.map(unpack_data)  # This will yield the three tensors separately
     
     # Batch the dataset
     dataset = dataset.batch(batch_size, num_parallel_calls=tf.data.experimental.AUTOTUNE)
@@ -156,3 +165,22 @@ def accuracy(ref, seq, balanced=False, min_coverage=0.0):
     else:
         accuracy = counts['='] / (counts['='] + counts['I'] + counts['X'] + counts['D'])
     return accuracy * 100
+
+class ReverseLayer(tf.keras.layers.Layer):
+    def __init__(self, axis=-1, **kwargs):
+        super(ReverseLayer, self).__init__(**kwargs)
+        self.axis = axis  # The axis to reverse along, default is the last axis
+
+    def call(self, inputs):
+        # Reverse the input tensor along the specified axis
+        return tf.reverse(inputs, axis=[self.axis])
+
+    def get_config(self):
+        config = super(ReverseLayer, self).get_config()
+        config.update({"axis": self.axis})
+        return config
+
+def model_summary_to_string(model):
+    summary_lines = []
+    model.summary(print_fn=lambda x: summary_lines.append(x))
+    return "\n".join(summary_lines)
