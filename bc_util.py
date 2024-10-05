@@ -5,6 +5,8 @@ import re
 import parasail
 from collections import defaultdict
 
+import csv
+
 split_cigar = re.compile(r"(?P<len>\d+)(?P<op>\D+)")
 
 def _parse_function(proto):
@@ -35,7 +37,7 @@ def _parse_function(proto):
     # Convert chunk and reference_length as they are
     chunk = tf.cast(parsed_features['chunk'], tf.float32)
     # For some reason the target_lengths in the train dataset are offset by 7!
-    reference_length = tf.cast(parsed_features['reference_length'], tf.int16)# + 7
+    reference_length = tf.cast(parsed_features['reference_length'], tf.int16) + 7
     
     return chunk, reference, reference_length
 
@@ -45,7 +47,7 @@ def load_tfrecords(tfrecord_file_path, batch_size=32, shuffle=False, repeat=Fals
     
     if shuffle:
         # Shuffle the dataset
-        dataset = dataset.shuffle(1024)
+        dataset = dataset.shuffle(2048)
     
     if repeat:
         # Repeat dataset indefinitely
@@ -180,7 +182,30 @@ class ReverseLayer(tf.keras.layers.Layer):
         config.update({"axis": self.axis})
         return config
 
+class CastToFloat32(tf.keras.layers.Layer):
+    def __init__(self):
+        super(CastToFloat32, self).__init__()
+
+    def call(self, inputs):
+        return tf.cast(inputs, tf.float32)
+
 def model_summary_to_string(model):
     summary_lines = []
     model.summary(print_fn=lambda x: summary_lines.append(x))
     return "\n".join(summary_lines)
+
+class CustomCSVLogger:
+    def __init__(self, filename, fieldnames):
+        self.filename = filename
+        self.fieldnames = fieldnames
+
+        # Open the file in write mode to initialize with the header
+        with open(self.filename, mode='w', newline='') as file:
+            writer = csv.DictWriter(file, fieldnames=self.fieldnames)
+            writer.writeheader()  # Write the header
+
+    def __call__(self, data):
+        # Open the file in append mode to write a new row
+        with open(self.filename, mode='a', newline='') as file:
+            writer = csv.DictWriter(file, fieldnames=self.fieldnames)
+            writer.writerow(data)

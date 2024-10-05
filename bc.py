@@ -30,6 +30,8 @@ if gpus:
     except RuntimeError as e:
         print(e)
 
+# Mixed precision
+tf.keras.mixed_precision.set_global_policy('mixed_float16')
 # Optimization
 tf.config.run_functions_eagerly(False)
 tf.config.optimizer.set_jit(True)
@@ -38,10 +40,10 @@ tf.config.optimizer.set_jit(True)
 np.set_printoptions(threshold=514)
 
 # Data directory
-directory = "./"
+directory = "/home/kaisern/Desktop/LRU/"
 # Hyperparameters
 BATCH_SIZE = 32
-EPOCHS = 600
+EPOCHS = 1000
 STEPS_PER_EPOCH = 1000
 CHUNK_LENGTH = 5000
 TARGET_LENGTH = 500
@@ -66,10 +68,13 @@ def build_model():
     x = tf.keras.layers.BatchNormalization()(x)
     x = tf.keras.layers.Conv1D(128, kernel_size=19, strides=6, activation='tanh', padding='same')(x)
     x = tf.keras.layers.BatchNormalization()(x)
-    x = lru.LRU_Block(N=128, H=512, bidirectional=False, max_phase=2*pi)(x)
-    x = bc_util.ReverseLayer(axis=1)(x)
-    x = lru.LRU_Block(N=128, H=512, bidirectional=False, max_phase=2*pi)(x)
-    x = bc_util.ReverseLayer(axis=1)(x)
+    tf.keras.mixed_precision.set_global_policy('float32')
+    x = lru.LRU_Block(N=256, H=1024, bidirectional=True, max_phase=2*pi/2)(x)
+    x = lru.LRU_Block(N=256, H=1024, bidirectional=True, max_phase=2*pi/2)(x)
+    x = lru.LRU_Block(N=256, H=1024, bidirectional=True, max_phase=2*pi/2)(x)
+    x = lru.LRU_Block(N=256, H=1024, bidirectional=True, max_phase=2*pi/2)(x)
+    x = lru.LRU_Block(N=256, H=1024, bidirectional=True, max_phase=2*pi/2)(x)
+    tf.keras.mixed_precision.set_global_policy('mixed_float16')
     #x = lru.LRU_Block(N=128, H=1024, bidirectional=False, max_phase=2*pi)(x)
     #x = bc_util.ReverseLayer(axis=1)(x)
     #x = lru.LRU_Block(N=128, H=1024, bidirectional=False, max_phase=2*pi)(x)
@@ -231,8 +236,11 @@ with tf.device('/GPU:0'):
 
     #reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor='loss', factor=0.5, patience=10, min_lr=1e-18)
     
-    optimizer = tf.keras.optimizers.AdamW(learning_rate=tf.keras.optimizers.schedules.CosineDecay(initial_learning_rate=2e-5, decay_steps=EPOCHS*STEPS_PER_EPOCH, alpha=0.001, warmup_target=8e-5, warmup_steps=4000), clipnorm=1, weight_decay=1e-4)
+    optimizer = tf.keras.optimizers.AdamW(learning_rate=tf.keras.optimizers.schedules.CosineDecay(initial_learning_rate=4e-4, decay_steps=EPOCHS*STEPS_PER_EPOCH, alpha=0.05, warmup_target=8e-4, warmup_steps=4000), clipnorm=1, weight_decay=1e-4)
     #optimizer = tf.keras.optimizers.AdamW(learning_rate=tf.keras.optimizers.schedules.ExponentialDecay(initial_learning_rate=8e-6, decay_steps=16000, decay_rate=0.95), clipnorm=1, weight_decay=1e-4)
+    #optimizer = tf.keras.optimizers.Adam(learning_rate=8e-5)
+    
+    optimizer = tf.keras.mixed_precision.LossScaleOptimizer(optimizer, dynamic=True)
     
     # Initialize the model and optimizer
     model = CTCModel()
@@ -248,7 +256,9 @@ with tf.device('/GPU:0'):
     # Fit the model using the dataset
     #model.fit(train_dataset, shuffle=False, validation_data=valid_dataset, epochs=EPOCHS, steps_per_epoch=STEPS_PER_EPOCH, validation_steps=1, callbacks=[CustomMetricsCallback(model_summary, valid_dataset)])
     
-    callback = CustomMetricsCallback(model_summary)
+    metrics = CustomMetricsCallback(model_summary)
+    csv_logger = bc_util.CustomCSVLogger("training.csv", ["epoch", "train_loss", "val_loss", "val_mean_accuracy", "val_median_accuracy"])
+    
     
     train_loss_results = []
     val_loss_results = []
@@ -302,8 +312,9 @@ with tf.device('/GPU:0'):
         print(f"Validation Loss: {val_loss:.6f}")
         
         prediction = model.predict(val_chunks)
-        callback.on_epoch_end(prediction, val_targets)
+        metrics.on_epoch_end(prediction, val_targets)
         
-        val_mean_accuracy.append(callback.mean_accuracy)
-        val_median_accuracy.append(callback.median_accuracy)
+        val_mean_accuracy.append(metrics.mean_accuracy)
+        val_median_accuracy.append(metrics.median_accuracy)
         
+        csv_logger({"epoch":epoch+1, "train_loss":train_loss, "val_loss":val_loss, "val_mean_accuracy":metrics.mean_accuracy, "val_median_accuracy":metrics.median_accuracy})
