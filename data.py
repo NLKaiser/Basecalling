@@ -1,58 +1,64 @@
-import numpy as np
 import tensorflow as tf
 
-def serialize_sparse_example(chunk, sparse_reference, reference_length):
-    # Convert sparse tensor to components
-    indices = sparse_reference.indices.numpy().astype(np.int64)
-    values = sparse_reference.values.numpy()
-    dense_shape = sparse_reference.dense_shape.numpy().astype(np.int64)
-    
-    # Ensure dense_shape is a list with one value for 1D tensors
-    assert len(dense_shape) == 1, "Dense shape should be a list with one value for 1D tensor."
-    
-    # Flatten indices for serialization
-    flattened_indices = indices.flatten()
-    
-    feature = {
-        'chunk': tf.train.Feature(float_list=tf.train.FloatList(value=chunk)),
-        'reference_indices': tf.train.Feature(int64_list=tf.train.Int64List(value=flattened_indices)),
-        'reference_values': tf.train.Feature(float_list=tf.train.FloatList(value=values)),
-        'reference_dense_shape': tf.train.Feature(int64_list=tf.train.Int64List(value=dense_shape)),
-        'reference_length': tf.train.Feature(int64_list=tf.train.Int64List(value=[reference_length])),
+def _parse_function(proto):
+    # Define your feature description dictionary
+    feature_description = {
+        'chunk': tf.io.FixedLenFeature([5000], tf.float32),  # Assuming chunk has a fixed size of 5000
+        'reference_indices': tf.io.VarLenFeature(tf.int64),  # Sparse tensor indices
+        'reference_values': tf.io.VarLenFeature(tf.float32),  # Sparse tensor values
+        'reference_dense_shape': tf.io.FixedLenFeature([1], tf.int64),  # Expecting dense_shape to be [1] for 1D
+        'reference_length': tf.io.FixedLenFeature([], tf.int64),  # Reference length
     }
-    example_proto = tf.train.Example(features=tf.train.Features(feature=feature))
-    return example_proto.SerializeToString()
-
-def convert_npys_to_tfrecords(chunks_file_path, references_file_path, reference_lengths_file_path, output_tfrecord_path):
-    # Load the numpy data
-    chunks = np.load(chunks_file_path)
-    references = np.load(references_file_path)
-    reference_lengths = np.load(reference_lengths_file_path)
     
-    # Create a TFRecord writer
-    with tf.io.TFRecordWriter(output_tfrecord_path) as writer:
-        for i in range(len(chunks)):
-            # Sensor readings
-            chunk = chunks[i]
-            
-            # The reference sequences, padded with 0
-            reference = references[i]
-            # Convert dense reference to sparse tensor
-            sparse_reference = tf.sparse.from_dense(reference)
-            
-            # Lengths of the reference sequences
-            reference_length = reference_lengths[i]
-            
-            # Serialize the example
-            example = serialize_sparse_example(chunk, sparse_reference, reference_length)
-            
-            # Write the serialized example to the TFRecord file
-            writer.write(example)
+    # Parse the input tf.Example proto using the dictionary
+    parsed_features = tf.io.parse_single_example(proto, feature_description)
+    
+    # Extract indices and reshape them to [num_non_zero_elements, 1] for sparse tensor
+    reference_indices = tf.reshape(parsed_features['reference_indices'].values, [-1, 1])
+    
+    # Reconstruct the sparse tensor for reference
+    reference = tf.SparseTensor(
+        indices=tf.cast(reference_indices, tf.int64),  # Reshaped indices for the sparse tensor
+        values=tf.cast(parsed_features['reference_values'].values, tf.int32),  # Sparse tensor values
+        dense_shape=tf.cast(parsed_features['reference_dense_shape'], tf.int64)  # Dense shape of the tensor
+    )
+    
+    #reference = tf.sparse.to_dense(reference)
+    
+    # Convert chunk and reference_length as they are
+    chunk = tf.cast(parsed_features['chunk'], tf.float32)
+    # For some reason the target_lengths in the train dataset are offset by 7!
+    length = tf.minimum(parsed_features['reference_length'] + 7, 50)
+    reference_length = tf.cast(length, tf.int16)
+    
+    return chunk, reference, reference_length
 
-def convert_dataset(path):
-    convert_npys_to_tfrecords(path + "chunks.npy", path + "references.npy", path + "reference_lengths.npy", "train_data.tfrecord")
-    path = path + "validation/"
-    convert_npys_to_tfrecords(path + "chunks.npy", path + "references.npy", path + "reference_lengths.npy", "valid_data.tfrecord")
+def load_tfrecords(tfrecord_file_path, batch_size=32, shuffle=False, repeat=False):
+    # Create a dataset from the TFRecord file
+    dataset = tf.data.TFRecordDataset(tfrecord_file_path)
+    
+    if shuffle:
+        # Shuffle the dataset
+        dataset = dataset.shuffle(4096)
+    
+    if repeat:
+        # Repeat dataset indefinitely
+        dataset = dataset.repeat()
+    
+    # Map the parsing function over the dataset
+    dataset = dataset.map(_parse_function, num_parallel_calls=tf.data.experimental.AUTOTUNE)
+    
+    # Return individual elements for unpacking
+    #def unpack_data(chunks, targets, reference_length):
+    #    return chunks, targets, reference_length
 
-path = "/home/kaisern/Desktop/workspace/example_data_dna_r10.4.1_v0/"
-convert_dataset(path)
+    #dataset = dataset.map(unpack_data)  # This will yield the three tensors
+    
+    # Batch the dataset
+    dataset = dataset.batch(batch_size, num_parallel_calls=tf.data.experimental.AUTOTUNE)
+    
+    # Prefetch data to improve performance
+    dataset = dataset.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
+    
+    return dataset
+
