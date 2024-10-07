@@ -33,7 +33,7 @@ if gpus:
 # Mixed precision
 #tf.keras.mixed_precision.set_global_policy('mixed_float16')
 # Optimization
-tf.config.run_functions_eagerly(False)
+#tf.config.run_functions_eagerly(False)
 tf.config.optimizer.set_jit(True)
 
 # Fully print arrays with lengths up to 514
@@ -148,15 +148,13 @@ with tf.device('/GPU:0'):
     
     # Initialise callbacks
     metrics = callbacks.Metrics(ALPHABET, model_summary)
-    model_reset = callbacks.ModelReset()
+    model_reset = callbacks.ModelReset(model)
     csv_logger = callbacks.CSVLogger("training.csv", ["epoch", "train_loss", "val_loss", "val_mean_accuracy", "val_median_accuracy"])
     
     train_loss_results = []
     val_loss_results = []
     val_mean_accuracy = []
     val_median_accuracy = []
-    
-    model_reset.save(model)
     
     # Custom training loop
     for epoch in range(EPOCHS):

@@ -73,7 +73,8 @@ class Metrics:
             return arr[:indices[0]]
 
 class ModelReset:
-    def __init__(self, reset_counter=0):
+    def __init__(self, model, reset_counter=0):
+        model.save_weights("model.weights.h5", overwrite=True)
         self.reset_counter = reset_counter
     
     def save(self, model):
