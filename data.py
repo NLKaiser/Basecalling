@@ -28,8 +28,8 @@ def _parse_function(proto):
     # Convert chunk and reference_length as they are
     chunk = tf.cast(parsed_features['chunk'], tf.float32)
     # For some reason the target_lengths in the train dataset are offset by 7!
-    length = tf.minimum(parsed_features['reference_length'] + 7, 50)
-    reference_length = tf.cast(length, tf.int16)
+    length = tf.minimum(parsed_features['reference_length'] + 7, 500)
+    reference_length = tf.cast(length, tf.int64)
     
     return chunk, reference, reference_length
 
