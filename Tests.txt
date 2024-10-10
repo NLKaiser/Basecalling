@@ -1,0 +1,174 @@
+Test 1:
+    x = tf.keras.layers.Conv1D(32, kernel_size=5, activation='swish', padding='same')(inputs)
+    x = tf.keras.layers.BatchNormalization()(x)
+    x = tf.keras.layers.Conv1D(64, kernel_size=5, activation='swish', padding='same')(x)
+    x = tf.keras.layers.BatchNormalization()(x)
+    x = tf.keras.layers.Conv1D(128, kernel_size=19, strides=6, activation='tanh', padding='same')(x)
+    x = tf.keras.layers.BatchNormalization()(x)
+    x = lru.LRU_Block(N=32, H=128, bidirectional=True, max_phase=2*pi/20, dropout=0)(x)
+    x = lru.LRU_Block(N=32, H=32, bidirectional=True, max_phase=2*pi/20, dropout=0)(x)
+    x = lru.LRU_Block(N=32, H=32, bidirectional=True, max_phase=2*pi/20, dropout=0)(x)
+    optimizer = tf.keras.optimizers.AdamW(learning_rate=tf.keras.optimizers.schedules.CosineDecay(initial_learning_rate=1e-4, decay_steps=EPOCHS*STEPS_PER_EPOCH, alpha=0.2))
+Params 255.000
+Max accuracy 84
+Result: Run ends in nans after 93 full epochs
+
+Test 2:
+    x = tf.keras.layers.Conv1D(32, kernel_size=5, activation='swish', padding='same')(inputs)
+    x = tf.keras.layers.BatchNormalization()(x)
+    x = tf.keras.layers.Conv1D(64, kernel_size=5, activation='swish', padding='same')(x)
+    x = tf.keras.layers.BatchNormalization()(x)
+    x = tf.keras.layers.Conv1D(128, kernel_size=19, strides=6, activation='tanh', padding='same')(x)
+    x = tf.keras.layers.BatchNormalization()(x)
+    x = lru.LRU_Block(N=32, H=128, bidirectional=False, max_phase=2*pi/20, dropout=0)(x)
+    x = layers.ReverseLayer(axis=1)(x)
+    x = lru.LRU_Block(N=32, H=32, bidirectional=False, max_phase=2*pi/20, dropout=0)(x)
+    x = layers.ReverseLayer(axis=1)(x)
+    x = lru.LRU_Block(N=32, H=32, bidirectional=False, max_phase=2*pi/20, dropout=0)(x)
+    optimizer = tf.keras.optimizers.AdamW(learning_rate=tf.keras.optimizers.schedules.CosineDecay(initial_learning_rate=1e-4, decay_steps=EPOCHS*STEPS_PER_EPOCH, alpha=0.2))
+Params 236.000
+Max accuracy 82
+Result: Run ends in nans after 88 full epochs
+
+Test 3:
+    x = tf.keras.layers.Conv1D(32, kernel_size=5, activation='swish', padding='same')(inputs)
+    x = tf.keras.layers.BatchNormalization()(x)
+    x = tf.keras.layers.Conv1D(64, kernel_size=5, activation='swish', padding='same')(x)
+    x = tf.keras.layers.BatchNormalization()(x)
+    x = tf.keras.layers.Conv1D(128, kernel_size=19, strides=6, activation='tanh', padding='same')(x)
+    x = tf.keras.layers.BatchNormalization()(x)
+    x = lru.LRU_Block(N=32, H=256, bidirectional=True, max_phase=2*pi/20, dropout=0)(x)
+    x = lru.LRU_Block(N=32, H=32, bidirectional=True, max_phase=2*pi/20, dropout=0)(x)
+    x = lru.LRU_Block(N=32, H=32, bidirectional=True, max_phase=2*pi/20, dropout=0)(x)
+    x = lru.LRU_Block(N=32, H=32, bidirectional=True, max_phase=2*pi/20, dropout=0)(x)
+    x = lru.LRU_Block(N=32, H=32, bidirectional=True, max_phase=2*pi/20, dropout=0)(x)
+    optimizer = tf.keras.optimizers.AdamW(learning_rate=tf.keras.optimizers.schedules.CosineDecay(initial_learning_rate=9e-5, decay_steps=EPOCHS*STEPS_PER_EPOCH, alpha=0.6), clipnorm=1, weight_decay=1e-4)
+Params 395.000
+Max accuracy 84
+Result: Run ends in nans after 34 full epochs
+
+Test 4:
+    x = tf.keras.layers.Conv1D(32, kernel_size=5, activation='swish', padding='same')(inputs)
+    x = tf.keras.layers.BatchNormalization()(x)
+    x = tf.keras.layers.Conv1D(64, kernel_size=5, activation='swish', padding='same')(x)
+    x = tf.keras.layers.BatchNormalization()(x)
+    x = tf.keras.layers.Conv1D(128, kernel_size=19, strides=6, activation='tanh', padding='same')(x)
+    x = tf.keras.layers.BatchNormalization()(x)
+    x = lru.LRU_Block(N=64, H=128, bidirectional=True, max_phase=2*pi/20, dropout=0.1)(x)
+    x = lru.LRU_Block(N=64, H=64, bidirectional=True, max_phase=2*pi/20, dropout=0.1)(x)
+    x = lru.LRU_Block(N=64, H=64, bidirectional=True, max_phase=2*pi/20, dropout=0.1)(x)
+    optimizer = tf.keras.optimizers.Adam(learning_rate=8e-5)
+Params 333.000
+Max accuracy 84
+Result: Run ends in nans after 50 full epochs
+
+Test 5:
+    x = tf.keras.layers.Conv1D(32, kernel_size=5, activation='swish', padding='same')(inputs)
+    x = tf.keras.layers.BatchNormalization()(x)
+    x = tf.keras.layers.Conv1D(64, kernel_size=5, activation='swish', padding='same')(x)
+    x = tf.keras.layers.BatchNormalization()(x)
+    x = tf.keras.layers.Conv1D(128, kernel_size=19, strides=6, activation='tanh', padding='same')(x)
+    x = tf.keras.layers.BatchNormalization()(x)
+    x = lru.LRU_Block(N=128, H=32, bidirectional=True, max_phase=2*pi/10, dropout=0.1)(x)
+    x = lru.LRU_Block(N=32, H=32, bidirectional=True, max_phase=2*pi/10, dropout=0.1)(x)
+    x = lru.LRU_Block(N=32, H=32, bidirectional=True, max_phase=2*pi/10, dropout=0.1)(x)
+    optimizer = tf.keras.optimizers.Adam(learning_rate=8e-5)
+Params 261.000
+Max accuracy 81
+Result: Run ends in nans after 80 full epochs
+
+Test 6:
+    x = tf.keras.layers.Conv1D(32, kernel_size=5, activation='swish', padding='same')(inputs)
+    x = tf.keras.layers.BatchNormalization()(x)
+    x = tf.keras.layers.Conv1D(64, kernel_size=5, activation='swish', padding='same')(x)
+    x = tf.keras.layers.BatchNormalization()(x)
+    x = tf.keras.layers.Conv1D(128, kernel_size=19, strides=6, activation='tanh', padding='same')(x)
+    x = tf.keras.layers.BatchNormalization()(x)
+    x = lru.LRU_Block(N=256, H=256, bidirectional=True, max_phase=2*pi/20, dropout=0.1)(x)
+    optimizer = tf.keras.optimizers.Adam(learning_rate=1e-4)
+Params 563.000
+Max accuracy 80
+Result: Run ends in nans after 25 full epochs
+
+Test 7:
+    x = tf.keras.layers.Conv1D(64, kernel_size=5, activation='swish', padding='same')(inputs)
+    x = tf.keras.layers.BatchNormalization()(x)
+    x = tf.keras.layers.Conv1D(128, kernel_size=19, strides=6, activation='tanh', padding='same')(x)
+    x = tf.keras.layers.BatchNormalization()(x)
+    x = lru.LRU_Block(N=128, H=128, bidirectional=True, max_phase=2*pi/20, dropout=0)(x)
+    x = lru.LRU_Block(N=128, H=128, bidirectional=True, max_phase=2*pi/20, dropout=0)(x)
+    x = lru.LRU_Block(N=128, H=128, bidirectional=True, max_phase=2*pi/20, dropout=0)(x)
+    x = lru.LRU_Block(N=128, H=128, bidirectional=True, max_phase=2*pi/20, dropout=0)(x)
+    x = lru.LRU_Block(N=128, H=256, bidirectional=True, max_phase=2*pi/20, dropout=0)(x)
+    optimizer = tf.keras.optimizers.Adam(learning_rate=8e-5)
+Params 819
+Max accuracy 86
+Result: Run ends in nans after 25 full epochs
+
+Test 8:
+    x = tf.keras.layers.Conv1D(32, kernel_size=5, activation='swish', padding='same')(inputs)
+    x = tf.keras.layers.BatchNormalization()(x)
+    x = tf.keras.layers.Conv1D(64, kernel_size=5, activation='swish', padding='same')(x)
+    x = tf.keras.layers.BatchNormalization()(x)
+    x = tf.keras.layers.Conv1D(128, kernel_size=19, strides=6, activation='tanh', padding='same')(x)
+    x = tf.keras.layers.BatchNormalization()(x)
+    x = lru.LRU_Block(N=64, H=64, bidirectional=True, max_phase=2*pi/20, dropout=0.5)(x)
+    x = lru.LRU_Block(N=64, H=64, bidirectional=True, max_phase=2*pi/20, dropout=0.5)(x)
+    x = lru.LRU_Block(N=64, H=64, bidirectional=True, max_phase=2*pi/20, dropout=0.5)(x)
+    x = lru.LRU_Block(N=64, H=64, bidirectional=True, max_phase=2*pi/20, dropout=0.5)(x)
+    x = lru.LRU_Block(N=64, H=64, bidirectional=True, max_phase=2*pi/20, dropout=0.5)(x)
+    optimizer = tf.keras.optimizers.Adam(learning_rate=8e-5)
+Params 351.000
+Max accuracy 85
+Result: Run ends in nans after 35 full epochs
+
+
+Test 9:
+    x = tf.keras.layers.Conv1D(32, kernel_size=5, activation='swish', padding='same')(inputs)
+    x = tf.keras.layers.BatchNormalization()(x)
+    x = tf.keras.layers.Conv1D(64, kernel_size=5, activation='swish', padding='same')(x)
+    x = tf.keras.layers.BatchNormalization()(x)
+    x = tf.keras.layers.Conv1D(128, kernel_size=19, strides=6, activation='tanh', padding='same')(x)
+    x = tf.keras.layers.BatchNormalization()(x)
+    x = lru.LRU_Block(N=256, H=256, bidirectional=True, max_phase=2*pi/20, dropout=0.1)(x)
+    x = lru.LRU_Block(N=256, H=256, bidirectional=True, max_phase=2*pi/20, dropout=0.1)(x)
+    x = lru.LRU_Block(N=256, H=256, bidirectional=True, max_phase=2*pi/20, dropout=0.1)(x)
+    optimizer = tf.keras.optimizers.Adam(learning_rate=8e-5)
+Params 1.617.000
+Batch size 128
+Max accuracy 87
+Result: Run ends in nans after 55 full epochs
+
+Test 10:
+    x = tf.keras.layers.Conv1D(32, kernel_size=5, activation='swish', padding='same')(inputs)
+    x = tf.keras.layers.BatchNormalization()(x)
+    x = tf.keras.layers.Conv1D(64, kernel_size=5, activation='swish', padding='same')(x)
+    x = tf.keras.layers.BatchNormalization()(x)
+    x = tf.keras.layers.Conv1D(128, kernel_size=19, strides=6, activation='tanh', padding='same')(x)
+    x = tf.keras.layers.BatchNormalization()(x)
+    x = lru.LRU_Block(N=64, H=64, bidirectional=True, max_phase=2*pi/20, dropout=0.8)(x)
+    x = lru.LRU_Block(N=64, H=64, bidirectional=True, max_phase=2*pi/20, dropout=0.8)(x)
+    x = lru.LRU_Block(N=64, H=64, bidirectional=True, max_phase=2*pi/20, dropout=0.8)(x)
+    x = lru.LRU_Block(N=64, H=64, bidirectional=True, max_phase=2*pi/20, dropout=0.8)(x)
+    x = lru.LRU_Block(N=64, H=64, bidirectional=True, max_phase=2*pi/20, dropout=0.8)(x)
+    optimizer = tf.keras.optimizers.Adam(learning_rate=8e-5)
+Params 351.000
+Max accuracy 85
+Result: Run ends in nans after 40 full epochs
+
+Test 11:
+    x = tf.keras.layers.Conv1D(64, kernel_size=5, activation='swish', padding='same')(inputs)
+    x = tf.keras.layers.BatchNormalization()(x)
+    x = tf.keras.layers.Conv1D(128, kernel_size=19, strides=6, activation='tanh', padding='same')(x)
+    x = tf.keras.layers.BatchNormalization()(x)
+    x = lru.LRU_Block(N=32, H=32, bidirectional=True, max_phase=2*pi/20, dropout=0.1)(x)
+    x = lru.LRU_Block(N=32, H=32, bidirectional=True, max_phase=2*pi/20, dropout=0.1)(x)
+    x = lru.LRU_Block(N=32, H=32, bidirectional=True, max_phase=2*pi/20, dropout=0.1)(x)
+    x = lru.LRU_Block(N=32, H=32, bidirectional=True, max_phase=2*pi/20, dropout=0.1)(x)
+    x = lru.LRU_Block(N=32, H=32, bidirectional=True, max_phase=2*pi/20, dropout=0.1)(x)
+    x = lru.LRU_Block(N=32, H=32, bidirectional=True, max_phase=2*pi/20, dropout=0.1)(x)
+    x = lru.LRU_Block(N=32, H=32, bidirectional=True, max_phase=2*pi/20, dropout=0.1)(x)
+    optimizer = tf.keras.optimizers.Adam(learning_rate=8e-5)
+Params 229.000
+Max accuracy 81
+Result: Run ends in nans after 36 full epochs

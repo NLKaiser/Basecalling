@@ -18,7 +18,9 @@ with open("training.csv") as f:
         val_median_accuracy.append(float(l[4]))
 
 train_loss = np.nan_to_num(train_loss, nan=1000, posinf=1000, neginf=1000)
+train_loss = np.clip(train_loss, a_min=None, a_max=1000)
 val_loss = np.nan_to_num(val_loss, nan=1000, posinf=1000, neginf=1000)
+val_loss = np.clip(val_loss, a_min=None, a_max=1000)
 
 plt.plot(epoch, train_loss, label='Training Loss', color='blue', marker='.', markersize=6, linestyle='None')
 plt.plot(epoch, val_loss, label='Validation Loss', color='red', marker='*', markersize=2, linestyle='None')
