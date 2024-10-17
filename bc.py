@@ -1,5 +1,6 @@
 import bc_util
 import data
+import layers
 import callbacks
 
 import LRU_tf as lru
@@ -43,7 +44,7 @@ np.set_printoptions(threshold=514)
 directory = "./"
 # Hyperparameters
 BATCH_SIZE = 32
-EPOCHS = 640
+EPOCHS = 5120
 STEPS_PER_EPOCH = 1000
 CHUNK_LENGTH = 5000
 TARGET_LENGTH = 500
@@ -57,28 +58,23 @@ pi = 3.14
 def build_model():
     inputs = tf.keras.Input(shape=(CHUNK_LENGTH, 1))  # Input shape is (5000, 1) for sensor readings
     
-    x = tf.keras.layers.Conv1D(16, kernel_size=5, activation='swish', padding='same')(inputs)
-    x = tf.keras.layers.BatchNormalization()(x)
-    x = tf.keras.layers.Conv1D(32, kernel_size=5, activation='swish', padding='same')(x)
-    x = tf.keras.layers.BatchNormalization()(x)
-    x = tf.keras.layers.Conv1D(128, kernel_size=19, strides=6, activation='tanh', padding='same')(x)
-    x = tf.keras.layers.BatchNormalization()(x)
-    x = lru.LRU_Block(N=256, H=1024, bidirectional=True, max_phase=2*pi/2)(x)
-    x = lru.LRU_Block(N=256, H=1024, bidirectional=True, max_phase=2*pi/2)(x)
-    x = lru.LRU_Block(N=256, H=1024, bidirectional=True, max_phase=2*pi/2)(x)
-    x = lru.LRU_Block(N=256, H=1024, bidirectional=True, max_phase=2*pi/2)(x)
-    x = lru.LRU_Block(N=256, H=1024, bidirectional=True, max_phase=2*pi/2)(x)
+    x = tf.keras.layers.Conv1D(32, kernel_size=5, activation='swish', padding='same', use_bias=True)(inputs)
+    x = tf.keras.layers.BatchNormalization(axis=-1, momentum=1, epsilon=1e-5)(x)
+    x = tf.keras.layers.Conv1D(32, kernel_size=5, activation='swish', padding='same', use_bias=True)(x)
+    x = tf.keras.layers.BatchNormalization(axis=-1, momentum=1, epsilon=1e-5)(x)
+    x = tf.keras.layers.Conv1D(128, kernel_size=19, strides=6, activation='tanh', padding='same', use_bias=True)(x)
+    x = tf.keras.layers.BatchNormalization(axis=-1, momentum=1, epsilon=1e-5)(x)
+    x = lru.LRU_Block(N=256, H=256, bidirectional=True, max_phase=2*pi/2)(x)
+    x = lru.LRU_Block(N=256, H=256, bidirectional=True, max_phase=2*pi/2)(x)
+    x = lru.LRU_Block(N=256, H=256, bidirectional=True, max_phase=2*pi/2)(x)
     
     #x = bc_util.ReverseLayer(axis=1)(x)
-    #x = lru.LRU_Block(N=128, H=1024, bidirectional=False, max_phase=2*pi)(x)
     #x = tf.keras.layers.Bidirectional(tf.keras.layers.LSTM(512, return_sequences=True))(x)
     #x = tf.keras.layers.Dense(2048)(x)
-    #x = tf.keras.layers.Lambda(lambda x: tf.clip_by_value(x, -5, 5))(x)
-    #x = lru.LRU_Block(N=256, H=256, bidirectional=True, max_phase=2*pi/10)(x)
     
     # Output layer - logits for each time step
-    classes = tf.keras.layers.Dense(NUM_CLASSES, dtype=tf.float32)(x)
-    #logits = tf.keras.layers.Softmax()(classes)
+    classes = tf.keras.layers.Dense(NUM_CLASSES, use_bias=False, dtype=tf.float32)(x)
+    classes = layers.ClipLayer(-5, 5)(classes)
     
     model = tf.keras.Model(inputs, classes)
     return model
@@ -127,7 +123,8 @@ class CTCModel(tf.keras.Model):
 
 with tf.device('/GPU:0'):
     
-    optimizer = tf.keras.optimizers.AdamW(learning_rate=tf.keras.optimizers.schedules.CosineDecay(initial_learning_rate=2e-4, decay_steps=EPOCHS*STEPS_PER_EPOCH, alpha=0.05, warmup_target=8e-4, warmup_steps=4000), clipnorm=1, weight_decay=1e-4)
+    #optimizer = tf.keras.optimizers.AdamW(learning_rate=tf.keras.optimizers.schedules.CosineDecay(initial_learning_rate=2e-4, decay_steps=EPOCHS*STEPS_PER_EPOCH, alpha=0.05, warmup_target=8e-4, warmup_steps=4000), clipnorm=1, weight_decay=1e-4)
+    optimizer = tf.keras.optimizers.AdamW(learning_rate=tf.keras.optimizers.schedules.CosineDecayRestarts(initial_learning_rate=2e-4, first_decay_steps=42000, t_mul=1, m_mul=1, alpha=0.00025))
     #optimizer = tf.keras.optimizers.Adam(learning_rate=8e-5)
     
     # Initialise the model and optimizer

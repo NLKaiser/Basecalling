@@ -15,3 +15,19 @@ class CastToFloat32(tf.keras.layers.Layer):
 
     def call(self, inputs):
         return tf.cast(inputs, tf.float32)
+
+class ClipLayer(tf.keras.layers.Layer):
+    def __init__(self, min_, max_):
+        super(ClipLayer, self).__init__()
+        self.min = min_
+        self.max = max_
+    
+    def call(self, inputs):
+        return tf.clip_by_value(inputs, self.min, self.max)
+
+class ConcatLayer(tf.keras.layers.Layer):
+    def __init__(self, **kwargs):
+        super(ConcatLayer, self).__init__(**kwargs)
+
+    def call(self, layers):
+        return tf.concat(layers, axis=-1)
