@@ -43,10 +43,10 @@ class Metrics:
         # Max accuracy during training
         self.max_mean_accuracy = max(self.max_mean_accuracy, np.mean(accs))
         # Print training statistics
-        print(f"Max mean accuracy over training: {self.max_mean_accuracy:.5f}")
-        print(f"mean_acc = {np.mean(accs):.5f}")
-        print(f"median_acc = {np.median(accs):.5f}")
-        print("Accuracies:", [f"{acc:.5f}" for acc in accs])
+        print(f"Max mean accuracy over training: {self.max_mean_accuracy:.2f}")
+        print(f"mean_acc = {np.mean(accs):.2f}")
+        print(f"median_acc = {np.median(accs):.2f}")
+        print("Accuracies:", [f"{acc:.2f}" for acc in accs])
         print("This is GPU 1!")
         self.mean_accuracy = np.mean(accs)
         self.median_accuracy = np.median(accs)
@@ -56,7 +56,7 @@ class Metrics:
         input_lengths = np.ones(logits.shape[0]) * logits.shape[1]
         
         # Decode the predictions
-        decoded_sequences = tf.keras.ops.ctc_decode(logits, sequence_lengths=input_lengths, strategy="beam_search", beam_width=32)
+        decoded_sequences = tf.keras.ops.ctc_decode(logits, sequence_lengths=input_lengths, strategy="beam_search", beam_width=128)
         decoded_sequences = tf.cast(decoded_sequences[0][0], tf.int32)
         
         # Convert the tensor sequences to numpy arrays

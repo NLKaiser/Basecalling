@@ -1,6 +1,7 @@
 import bc_util
 import data
 import layers
+import schedulers
 import callbacks
 
 import LRU_tf as lru
@@ -58,19 +59,15 @@ pi = 3.14
 def build_model():
     inputs = tf.keras.Input(shape=(CHUNK_LENGTH, 1))  # Input shape is (5000, 1) for sensor readings
     
-    x = tf.keras.layers.Conv1D(32, kernel_size=5, activation='swish', padding='same', use_bias=True)(inputs)
-    x = tf.keras.layers.BatchNormalization(axis=-1, momentum=1, epsilon=1e-5)(x)
-    x = tf.keras.layers.Conv1D(32, kernel_size=5, activation='swish', padding='same', use_bias=True)(x)
-    x = tf.keras.layers.BatchNormalization(axis=-1, momentum=1, epsilon=1e-5)(x)
-    x = tf.keras.layers.Conv1D(128, kernel_size=19, strides=6, activation='tanh', padding='same', use_bias=True)(x)
-    x = tf.keras.layers.BatchNormalization(axis=-1, momentum=1, epsilon=1e-5)(x)
+    x = tf.keras.layers.Conv1D(16, kernel_size=5, activation='swish', padding='same', use_bias=True)(inputs)
+    x = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.1, epsilon=1e-5)(x)
+    x = tf.keras.layers.Conv1D(16, kernel_size=5, activation='swish', padding='same', use_bias=True)(x)
+    x = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.1, epsilon=1e-5)(x)
+    x = tf.keras.layers.Conv1D(384, kernel_size=19, strides=6, activation='tanh', padding='same', use_bias=True)(x)
+    x = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.1, epsilon=1e-5)(x)
     x = lru.LRU_Block(N=256, H=256, bidirectional=True, max_phase=2*pi/2)(x)
     x = lru.LRU_Block(N=256, H=256, bidirectional=True, max_phase=2*pi/2)(x)
     x = lru.LRU_Block(N=256, H=256, bidirectional=True, max_phase=2*pi/2)(x)
-    
-    #x = bc_util.ReverseLayer(axis=1)(x)
-    #x = tf.keras.layers.Bidirectional(tf.keras.layers.LSTM(512, return_sequences=True))(x)
-    #x = tf.keras.layers.Dense(2048)(x)
     
     # Output layer - logits for each time step
     classes = tf.keras.layers.Dense(NUM_CLASSES, use_bias=False, dtype=tf.float32)(x)
@@ -123,8 +120,13 @@ class CTCModel(tf.keras.Model):
 
 with tf.device('/GPU:0'):
     
+    optimizer = tf.keras.optimizers.AdamW(learning_rate=schedulers.WarmUpCosineDecayWithRestarts(
+        warmup_initial=1e-4, warmup_end=4e-4, warmup_steps=100000,
+        initial_learning_rate=1e-4, decay_steps=400000, alpha=1e-8, t_mul=1.2, m_mul=1.0)
+    )
+    
     #optimizer = tf.keras.optimizers.AdamW(learning_rate=tf.keras.optimizers.schedules.CosineDecay(initial_learning_rate=2e-4, decay_steps=EPOCHS*STEPS_PER_EPOCH, alpha=0.05, warmup_target=8e-4, warmup_steps=4000), clipnorm=1, weight_decay=1e-4)
-    optimizer = tf.keras.optimizers.AdamW(learning_rate=tf.keras.optimizers.schedules.CosineDecayRestarts(initial_learning_rate=2e-4, first_decay_steps=42000, t_mul=1, m_mul=1, alpha=0.00025))
+    #optimizer = tf.keras.optimizers.AdamW(learning_rate=tf.keras.optimizers.schedules.CosineDecayRestarts(initial_learning_rate=2e-4, first_decay_steps=42000, t_mul=1, m_mul=1, alpha=0.00025))
     #optimizer = tf.keras.optimizers.Adam(learning_rate=8e-5)
     
     # Initialise the model and optimizer
@@ -190,7 +192,7 @@ with tf.device('/GPU:0'):
         train_loss /= STEPS_PER_EPOCH
         train_loss_results.append(train_loss)
         
-        print(f"Train Loss: {train_loss:.6f}")
+        print(f"Train Loss: {train_loss:.2f}")
         
         val_batch = next(valid_iter)
         
@@ -202,9 +204,13 @@ with tf.device('/GPU:0'):
         
         val_loss_results.append(val_loss)
         
-        print(f"Validation Loss: {val_loss:.6f}")
+        print(f"Validation Loss: {val_loss:.2f}")
         
         print("Resets:", model_reset.reset_counter)
+        
+        print(f"Loss: {train_loss:.2f}")
+        print(f"Min Loss: {min(train_loss_results):.2f}")
+        print("Last 10 Losses:", [f"{l:.2f}" for l in train_loss_results[-10:]])
         
         prediction = model.predict(val_chunks)
         metrics.on_epoch_end(prediction, val_targets)
