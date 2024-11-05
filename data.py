@@ -62,3 +62,29 @@ def load_tfrecords(tfrecord_file_path, batch_size=32, shuffle=False, repeat=Fals
     
     return dataset
 
+# Naive reduction of training data set time steps
+def reduce_data(chunks, targets, target_lengths, factor):
+    # Convert targets from sparse to dense once at the beginning
+    targets = tf.sparse.to_dense(targets)
+    
+    # Reduce the chunk size based on factor
+    chunks = chunks[:, :tf.cast(tf.math.ceil(chunks.shape[1] / factor), dtype=tf.int32)]
+    
+    # Compute the reduced target lengths and cast to int
+    target_lengths = tf.cast(tf.math.ceil(target_lengths / factor), dtype=tf.int32)
+    
+    # Use a mask to trim each row in `targets` according to `target_lengths`
+    max_seq_length = tf.shape(targets)[1]  # Actual max length in targets (e.g., 500 in this case)
+    mask = tf.sequence_mask(target_lengths, max_seq_length)  # Ensure mask has same width as targets
+
+    # Apply the mask to reduce `targets` length based on `target_lengths`
+    targets_new = tf.ragged.boolean_mask(targets, mask)  # Ragged tensor allows variable lengths per row
+    
+    # Convert the ragged tensor to a dense tensor, padding as needed to the correct shape
+    target_shape = tf.cast(tf.math.ceil(tf.shape(targets)[1] / factor), dtype=tf.int32)
+    targets_dense = targets_new.to_tensor(default_value=0, shape=[tf.shape(targets)[0], target_shape])
+    
+    # Convert back to sparse only once at the end
+    targets = tf.sparse.from_dense(tf.cast(targets_dense, dtype=tf.int32))
+    
+    return chunks, targets, target_lengths
