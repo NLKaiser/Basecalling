@@ -535,4 +535,203 @@ Max mean accuracy 94.8
 Min loss 98.5
 Result: Training stopped after 3403 epochs as the loss barely decreased anymore.
 
+Test 36:
+    x = tf.keras.layers.Conv1D(16, kernel_size=5, activation='swish', padding='same', use_bias=True, dtype=tf.float32)(inputs)
+    x = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.1, epsilon=1e-5, dtype=tf.float32)(x)
+    x = tf.keras.layers.Conv1D(16, kernel_size=5, activation='swish', padding='same', use_bias=True, dtype=tf.float32)(x)
+    x = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.1, epsilon=1e-5, dtype=tf.float32)(x)
+    x = tf.keras.layers.Conv1D(384, kernel_size=19, strides=6, activation='tanh', padding='same', use_bias=True, dtype=tf.float32)(x)
+    x = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.1, epsilon=1e-5, dtype=tf.float32)(x)
+    x = lru.LRU_Block(N=256, H=1024, bidirectional=True, max_phase=2*pi/200, r_min=0.01, r_max=1, dropout=0.9)(x)
+    x = lru.LRU_Block(N=256, H=1024, bidirectional=True, max_phase=2*pi/200, r_min=0.01, r_max=1, dropout=0.9)(x)
+    x = lru.LRU_Block(N=256, H=1024, bidirectional=True, max_phase=2*pi/200, r_min=0.01, r_max=1, dropout=0.9)(x)
+    x = lru.LRU_Block(N=256, H=1024, bidirectional=True, max_phase=2*pi/200, r_min=0.01, r_max=1, dropout=0.9)(x)
+    x = lru.LRU_Block(N=256, H=1024, bidirectional=True, max_phase=2*pi/200, r_min=0.01, r_max=1, dropout=0.9)(x)
+    classes = tf.keras.layers.Dense(NUM_CLASSES, use_bias=False, dtype=tf.float32)(x)
+    classes = layers.ClipLayer(-50, 50)(classes)
+    scheduler = schedulers.LRReductionScheduler(
+             initial_lr=2e-4,
+             patience=100,
+             reduce_difference=-1,
+             factor=0.9,
+             wait_steps=110,
+             min_lr=1e-8,
+             reset=True)
+    optimizer = tf.keras.optimizers.Adam(learning_rate=scheduler, weight_decay=0, epsilon=1e-10)
+Batch size 16
+Params 17.853.000
+Max mean accuracy 93.2
+Min loss 127.0
+Result: Training stopped after 732 epochs as it spiraled out of control after 436 epochs.
+
+Test 37:
+    x = tf.keras.layers.Conv1D(16, kernel_size=5, activation='swish', padding='same', use_bias=True)(inputs)
+    x = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.1, epsilon=1e-5)(x)
+    x = tf.keras.layers.Conv1D(16, kernel_size=5, activation='swish', padding='same', use_bias=True)(x)
+    x = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.1, epsilon=1e-5)(x)
+    x = tf.keras.layers.Conv1D(384, kernel_size=19, strides=6, activation='tanh', padding='same', use_bias=True)(x)
+    x = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.1, epsilon=1e-5)(x)
+    residual = tf.keras.layers.Conv1D(384, kernel_size=19, strides=6, padding='same', use_bias=True)(inputs)
+    x = tf.keras.layers.add([residual, x])
+    x = lru.LRU_Block(N=256, H=1024, bidirectional=True, max_phase=2*pi/1000, r_min=0.05, r_max=1, dropout=0)(x)
+    x = lru.LRU_Block(N=256, H=1024, bidirectional=True, max_phase=2*pi/1000, r_min=0.05, r_max=1, dropout=0)(x)
+    x = lru.LRU_Block(N=256, H=1024, bidirectional=True, max_phase=2*pi/1000, r_min=0.05, r_max=1, dropout=0)(x)
+    classes = tf.keras.layers.Dense(NUM_CLASSES, use_bias=False, dtype=tf.float32)(x)
+    classes = layers.ClipLayer(-50, 50)(classes)
+    scheduler = schedulers.LRReductionScheduler(
+             initial_lr=8e-4,
+             patience=60,
+             reduce_difference=0.8,
+             factor=0.8,
+             wait_steps=80,
+             min_lr=1e-10,
+             reset=True)
+    optimizer = tf.keras.optimizers.AdamW(learning_rate=scheduler, clipnorm=1, weight_decay=0, epsilon=1e-10)
+Batch size 16
+Params 10.506.000
+Max mean accuracy 93.6
+Min loss 113.8
+Result: Training stopped after 1775 epochs as the loss barely decreased anymore and there is much overfitting.
+
+Test 38:
+    x = tf.keras.layers.Conv1D(16, kernel_size=5, activation='swish', padding='same', use_bias=True, dtype=tf.float32)(inputs)
+    x = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.1, epsilon=1e-5, dtype=tf.float32)(x)
+    x = tf.keras.layers.Conv1D(16, kernel_size=5, activation='swish', padding='same', use_bias=True, dtype=tf.float32)(x)
+    x = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.1, epsilon=1e-5, dtype=tf.float32)(x)
+    x = tf.keras.layers.Conv1D(384, kernel_size=19, strides=6, activation='tanh', padding='same', use_bias=True, dtype=tf.float32)(x)
+    x = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.1, epsilon=1e-5, dtype=tf.float32)(x)
+    x = lru.LRU_Block(N=384, H=512, bidirectional=True, max_phase=2*pi/20, r_min=0.001, r_max=0.999, dropout=0.5)(x)
+    x = lru.LRU_Block(N=384, H=512, bidirectional=True, max_phase=2*pi/20, r_min=0.001, r_max=0.999, dropout=0.5)(x)
+    x = lru.LRU_Block(N=384, H=512, bidirectional=True, max_phase=2*pi/20, r_min=0.001, r_max=0.999, dropout=0.5)(x)
+    classes = tf.keras.layers.Dense(NUM_CLASSES, use_bias=False, dtype=tf.float32)(x)
+    classes = layers.ClipLayer(-5, 5)(classes)
+    scheduler = tf.keras.optimizers.schedules.CosineDecayRestarts(initial_learning_rate=2e-4, first_decay_steps=1800000, t_mul=1.1, m_mul=1, alpha=0.000005)
+    optimizer = tf.keras.optimizers.Adam(learning_rate=scheduler, weight_decay=0.01)
+Batch size 16
+Params 5.051.000
+Max mean accuracy 93.3
+Min loss 122
+Result: Training stopped after 6563 epochs as the scheduler resetted for the third time and the loss decrease was very slow.
+
+Test 39:
+    x = tf.keras.layers.Conv1D(16, kernel_size=5, activation='swish', padding='same', use_bias=True, dtype=tf.float32)(inputs)
+    x = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.1, epsilon=1e-5, dtype=tf.float32)(x)
+    residual2 = x
+    x = tf.keras.layers.Conv1D(16, kernel_size=5, activation='swish', padding='same', use_bias=True, dtype=tf.float32)(x)
+    x = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.1, epsilon=1e-5, dtype=tf.float32)(x)
+    x = tf.keras.layers.Conv1D(384, kernel_size=19, strides=6, activation='tanh', padding='same', use_bias=True, dtype=tf.float32)(x)
+    x = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.1, epsilon=1e-5, dtype=tf.float32)(x)
+    residual1 = tf.keras.layers.Conv1D(384, kernel_size=19, strides=6, activation='tanh', padding='same', use_bias=True, dtype=tf.float32)(inputs)
+    residual1 = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.1, epsilon=1e-5, dtype=tf.float32)(residual1)
+    residual2 = tf.keras.layers.Conv1D(384, kernel_size=19, strides=6, activation='tanh', padding='same', use_bias=True, dtype=tf.float32)(residual2)
+    residual2 = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.1, epsilon=1e-5, dtype=tf.float32)(residual2)
+    x = tf.keras.layers.Concatenate(axis=-1)([residual1, residual2, x])
+    x = lru.LRU_Block(N=128, H=384, bidirectional=True, max_phase=2*pi/10, dropout=0.7)(x)
+    x = lru.LRU_Block(N=128, H=384, bidirectional=True, max_phase=2*pi/10, dropout=0.7)(x)
+    x = lru.LRU_Block(N=128, H=384, bidirectional=True, max_phase=2*pi/10, dropout=0.7)(x)
+    x = lru.LRU_Block(N=128, H=384, bidirectional=True, max_phase=2*pi/10, dropout=0.7)(x)
+    x = lru.LRU_Block(N=128, H=384, bidirectional=True, max_phase=2*pi/10, dropout=0.7)(x)
+    x = lru.LRU_Block(N=128, H=384, bidirectional=True, max_phase=2*pi/10, dropout=0.7)(x)
+    x = lru.LRU_Block(N=128, H=384, bidirectional=True, max_phase=2*pi/10, dropout=0.7)(x)
+    classes = tf.keras.layers.Dense(NUM_CLASSES, use_bias=False, dtype=tf.float32)(x)
+    classes = layers.ClipLayer(-5, 5)(classes)
+    scheduler = tf.keras.optimizers.schedules.CosineDecayRestarts(initial_learning_rate=1e-4, first_decay_steps=2200000, t_mul=1.1, m_mul=1, alpha=0.000005)
+    optimizer = tf.keras.optimizers.Adam(learning_rate=scheduler, weight_decay=0.01)
+Batch size 16
+Params 4.794.000
+Max mean accuracy 95.8
+Min loss 83.3
+Result: Training stopped after 7314 epochs as the start of a new cycle. The loss might further decrease but slowly.
+
+Test 40:
+    x = tf.keras.layers.Conv1D(16, kernel_size=5, activation='swish', padding='same', use_bias=True)(inputs)
+    x = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.1, epsilon=1e-5)(x)
+    resx = x
+    x = tf.keras.layers.Conv1D(16, kernel_size=5, activation='swish', padding='same', use_bias=True)(x)
+    x = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.1, epsilon=1e-5)(x)
+    x = tf.keras.layers.Conv1D(384, kernel_size=19, strides=6, activation='tanh', padding='same', use_bias=True)(x)
+    x = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.1, epsilon=1e-5)(x)
+    resx = layers.DynamicPaddingLayer()(resx)
+    resx = tf.keras.layers.Reshape((-1, 6, 16))(resx)
+    resx = tf.keras.layers.Reshape((-1, 16 * 6))(resx)
+    resx = tf.keras.layers.Dense(384, use_bias=False)(resx)
+    x = tf.keras.layers.add([resx, x])
+    x = lru.LRU_Block(N=96, H=768, bidirectional=True, max_phase=2*pi/5)(x)
+    x = lru.LRU_Block(N=96, H=768, bidirectional=True, max_phase=2*pi/5)(x)
+    x = lru.LRU_Block(N=96, H=768, bidirectional=True, max_phase=2*pi/5)(x)
+    x = lru.LRU_Block(N=96, H=768, bidirectional=True, max_phase=2*pi/5)(x)
+    x = lru.LRU_Block(N=96, H=768, bidirectional=True, max_phase=2*pi/5)(x)
+    classes = tf.keras.layers.Dense(NUM_CLASSES, use_bias=False, dtype=tf.float32)(x)
+    classes = layers.ClipLayer(-5, 5)(classes)
+    optimizer = tf.keras.optimizers.AdamW(learning_rate=tf.keras.optimizers.schedules.CosineDecayRestarts(initial_learning_rate=1e-4, first_decay_steps=164000, t_mul=1.2, m_mul=1, alpha=0.000000000000001))
+Batch size 32
+Params 8.146.000
+Max mean accuracy 95.1
+Min loss 90.2
+Result: Training stopped after 5680 epochs.
+
+Test 41:
+    x = tf.keras.layers.Conv1D(16, kernel_size=5, activation='swish', padding='same', use_bias=True)(inputs)
+    x = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.1, epsilon=1e-5)(x)
+    x = tf.keras.layers.Conv1D(16, kernel_size=5, activation='swish', padding='same', use_bias=True)(x)
+    x = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.1, epsilon=1e-5)(x)
+    x = tf.keras.layers.Conv1D(384, kernel_size=19, strides=6, activation='tanh', padding='same', use_bias=True)(x)
+    x = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.1, epsilon=1e-5)(x)
+    x = lru.LRU_Block(N=256, H=1024, bidirectional=True, max_phase=2*pi/20, dropout=0.9)(x)
+    x = lru.LRU_Block(N=256, H=1024, bidirectional=True, max_phase=2*pi/20, dropout=0.9)(x)
+    x = lru.LRU_Block(N=256, H=1024, bidirectional=True, max_phase=2*pi/20, dropout=0.9)(x)
+    x = lru.LRU_Block(N=256, H=1024, bidirectional=True, max_phase=2*pi/20, dropout=0.9)(x)
+    x = lru.LRU_Block(N=256, H=1024, bidirectional=True, max_phase=2*pi/20, dropout=0.9)(x)
+    classes = tf.keras.layers.Dense(NUM_CLASSES, use_bias=False, dtype=tf.float32)(x)
+    classes = layers.ClipLayer(-5, 5)(classes)
+    optimizer = tf.keras.optimizers.Adam(learning_rate=tf.keras.optimizers.schedules.CosineDecayRestarts(initial_learning_rate=2e-4, first_decay_steps=2000000, t_mul=1.1, m_mul=1, alpha=0.001))
+Batch size 16
+Params 17.853.000
+Max mean accuracy 95.8
+Min loss 74.3
+Result: Training stopped after 2565 epochs.
+
+Test 42:
+
+    x = tf.keras.layers.Conv1D(16, kernel_size=5, activation='swish', padding='same', use_bias=True)(inputs)
+    x = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.1, epsilon=1e-5)(x)
+    x = tf.keras.layers.Conv1D(16, kernel_size=5, activation='swish', padding='same', use_bias=True)(x)
+    x = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.1, epsilon=1e-5)(x)
+    x = tf.keras.layers.Conv1D(384, kernel_size=19, strides=6, activation='tanh', padding='same', use_bias=True)(x)
+    x = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.1, epsilon=1e-5)(x)
+    x = lru.LRU_Block(N=256, H=1024, bidirectional=True, max_phase=2*pi/20, dropout=0.9)(x)
+    x = lru.LRU_Block(N=256, H=1024, bidirectional=True, max_phase=2*pi/20, dropout=0.9)(x)
+    x = lru.LRU_Block(N=256, H=1024, bidirectional=True, max_phase=2*pi/20, dropout=0.9)(x)
+    x = lru.LRU_Block(N=256, H=1024, bidirectional=True, max_phase=2*pi/20, dropout=0.9)(x)
+    x = lru.LRU_Block(N=256, H=1024, bidirectional=True, max_phase=2*pi/20, dropout=0.9)(x)
+    classes = tf.keras.layers.Dense(NUM_CLASSES, use_bias=False, dtype=tf.float32)(x)
+    classes = layers.ClipLayer(-5, 5)(classes)
+    optimizer = tf.keras.optimizers.Adam(learning_rate=tf.keras.optimizers.schedules.CosineDecayRestarts(initial_learning_rate=2e-4, first_decay_steps=2800000, t_mul=1.1, m_mul=1, alpha=0.0005), weight_decay=0.01)
+Batch size 16
+Params 17.853.000
+Max mean accuracy 96.0
+Min loss 67.3
+Result: Training stopped after 2730 epochs.
+
+Test 43:
+    x = tf.keras.layers.Conv1D(16, kernel_size=5, activation='swish', padding='same', use_bias=True)(inputs)
+    x = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.1, epsilon=1e-5)(x)
+    x = tf.keras.layers.Conv1D(16, kernel_size=5, activation='swish', padding='same', use_bias=True)(x)
+    x = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.1, epsilon=1e-5)(x)
+    x = tf.keras.layers.Conv1D(384, kernel_size=19, strides=6, activation='tanh', padding='same', use_bias=True)(x)
+    x = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.1, epsilon=1e-5)(x)
+    x = lru.LRU_Block(N=256, H=1024, bidirectional=True, max_phase=2*pi/20, dropout=0.9)(x)
+    x = lru.LRU_Block(N=256, H=1024, bidirectional=True, max_phase=2*pi/20, dropout=0.9)(x)
+    x = lru.LRU_Block(N=256, H=1024, bidirectional=True, max_phase=2*pi/20, dropout=0.9)(x)
+    x = lru.LRU_Block(N=256, H=1024, bidirectional=True, max_phase=2*pi/20, dropout=0.9)(x)
+    x = lru.LRU_Block(N=256, H=1024, bidirectional=True, max_phase=2*pi/20, dropout=0.9)(x)
+    classes = tf.keras.layers.Dense(NUM_CLASSES, use_bias=False, dtype=tf.float32)(x)
+    classes = layers.ClipLayer(-5, 5)(classes)
+    optimizer = tf.keras.optimizers.Adam(learning_rate=tf.keras.optimizers.schedules.CosineDecayRestarts(initial_learning_rate=2e-4, first_decay_steps=2800000, t_mul=1.1, m_mul=1, alpha=0.0005), weight_decay=0.05)
+Batch size 16
+Params 17.853.000
+Max mean accuracy 93.9
+Min loss 112.5
+Result: Training stopped after 3294 epochs.
+
 
