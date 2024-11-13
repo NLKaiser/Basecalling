@@ -1,8 +1,11 @@
 import bc_util
 
+import LRU_tf as lru
+
 import numpy as np
 import tensorflow as tf
 
+import json
 import csv
 
 class Metrics:
@@ -47,7 +50,7 @@ class Metrics:
         print(f"mean_acc = {np.mean(accs):.2f}")
         print(f"median_acc = {np.median(accs):.2f}")
         print("Accuracies:", [f"{acc:.2f}" for acc in accs])
-        #print("This is GPU 1!")
+        print("This is GPU 1!")
         self.mean_accuracy = np.mean(accs)
         self.median_accuracy = np.median(accs)
     
@@ -84,6 +87,20 @@ class ModelReset:
         model.load_weights("model.weights.h5")
         self.reset_counter += 1
 
+class LRULogger:
+    def __call__(self, model):
+        layers_ = {}
+        c = 0
+        for layer in model.base_model.layers:
+            if isinstance(layer, lru.LRU_Block):
+                nu_fw = layer.lru_fw.nu_log.numpy().tolist()
+                nu_rv = layer.lru_rv.nu_log.numpy().tolist()
+                theta_fw = layer.lru_fw.theta_log.numpy().tolist()
+                theta_rv = layer.lru_rv.theta_log.numpy().tolist()
+                layers_[c] = {"nu_fw":nu_fw, "nu_rv":nu_rv, "theta_fw":theta_fw, "theta_rv":theta_rv}
+                c += 1
+        return layers_
+
 class CSVLogger:
     def __init__(self, filename, fieldnames):
         self.filename = filename
@@ -91,11 +108,11 @@ class CSVLogger:
 
         # Open the file in write mode to initialize with the header
         with open(self.filename, mode='w', newline='') as file:
-            writer = csv.DictWriter(file, fieldnames=self.fieldnames)
+            writer = csv.DictWriter(file, fieldnames=self.fieldnames, delimiter=';')
             writer.writeheader()  # Write the header
 
     def __call__(self, data):
         # Open the file in append mode to write a new row
         with open(self.filename, mode='a', newline='') as file:
-            writer = csv.DictWriter(file, fieldnames=self.fieldnames)
+            writer = csv.DictWriter(file, fieldnames=self.fieldnames, delimiter=';')
             writer.writerow(data)

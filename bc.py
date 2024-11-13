@@ -59,18 +59,24 @@ pi = 3.14
 def build_model():
     inputs = tf.keras.Input(shape=(CHUNK_LENGTH, 1))  # Input shape is (5000, 1) for sensor readings
     
-    x = tf.keras.layers.Conv1D(16, kernel_size=5, activation='swish', padding='same', use_bias=True, dtype=tf.float32)(inputs)
-    x = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.1, epsilon=1e-5, dtype=tf.float32)(x)
-    x = tf.keras.layers.Conv1D(16, kernel_size=5, activation='swish', padding='same', use_bias=True, dtype=tf.float32)(x)
-    x = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.1, epsilon=1e-5, dtype=tf.float32)(x)
-    x = tf.keras.layers.Conv1D(384, kernel_size=19, strides=6, activation='tanh', padding='same', use_bias=True, dtype=tf.float32)(x)
-    x = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.1, epsilon=1e-5, dtype=tf.float32)(x)
-    x = lru.LRU_Block(N=384, H=1024, bidirectional=True, max_phase=2*pi/1000, r_min=0.05, r_max=1, dropout=0.9)(x)
-    x = lru.LRU_Block(N=384, H=1024, bidirectional=True, max_phase=2*pi/1000, r_min=0.05, r_max=1, dropout=0.9)(x)
-    x = lru.LRU_Block(N=384, H=1024, bidirectional=True, max_phase=2*pi/1000, r_min=0.05, r_max=1, dropout=0.9)(x)
+    tf.keras.mixed_precision.set_global_policy('mixed_float16')
+    x = tf.keras.layers.Conv1D(16, kernel_size=5, activation='swish', padding='same', use_bias=True)(inputs)
+    x = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.1, epsilon=1e-5)(x)
+    x = tf.keras.layers.Conv1D(16, kernel_size=5, activation='swish', padding='same', use_bias=True)(x)
+    x = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.1, epsilon=1e-5)(x)
+    x = tf.keras.layers.Conv1D(384, kernel_size=19, strides=6, activation='tanh', padding='same', use_bias=True)(x)
+    x = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.1, epsilon=1e-5)(x)
+    tf.keras.mixed_precision.set_global_policy('float32')
+    
+    x = lru.LRU_Block(N=256, H=1024, bidirectional=True, max_phase=2*pi/100, dropout=0.9)(x)
+    x = lru.LRU_Block(N=256, H=1024, bidirectional=True, max_phase=2*pi/100, dropout=0.9)(x)
+    x = lru.LRU_Block(N=256, H=1024, bidirectional=True, max_phase=2*pi/100, dropout=0.9)(x)
+    x = lru.LRU_Block(N=256, H=1024, bidirectional=True, max_phase=2*pi/100, dropout=0.9)(x)
+    x = lru.LRU_Block(N=256, H=1024, bidirectional=True, max_phase=2*pi/100, dropout=0.9)(x)
+    x = lru.LRU_Block(N=256, H=1024, bidirectional=True, max_phase=2*pi/100, dropout=0.9)(x)
     
     # Output layer - logits for each time step
-    classes = tf.keras.layers.Dense(NUM_CLASSES, use_bias=False, dtype=tf.float32)(x)
+    classes = tf.keras.layers.Dense(NUM_CLASSES, use_bias=True, dtype=tf.float32)(x)
     classes = layers.ClipLayer(-5, 5)(classes)
     
     model = tf.keras.Model(inputs, classes)
@@ -120,11 +126,10 @@ class CTCModel(tf.keras.Model):
 
 with tf.device('/GPU:0'):
     
-    scheduler = schedulers.LRReductionScheduler(initial_lr=8e-4, patience=60,
-                 reduce_difference=0.8, factor=0.8, wait_steps=80, min_lr=1e-10,
-                 reset=True)
-    
-    optimizer = tf.keras.optimizers.AdamW(learning_rate=scheduler, clipnorm=1, weight_decay=0, epsilon=1e-10)
+    scheduler = schedulers.WarmUpCosineDecayWithRestarts(
+        warmup_initial=1e-8, warmup_end=1e-5, warmup_steps=400000,
+        initial_learning_rate=2e-4, decay_steps=4200000, alpha=0.45, t_mul=1.5, m_mul=0.96)
+    optimizer = tf.keras.optimizers.AdamW(learning_rate=scheduler, weight_decay=0.005)
     
     # Initialise the model and optimizer
     model = CTCModel()
@@ -145,7 +150,10 @@ with tf.device('/GPU:0'):
     # Initialise callbacks
     metrics = callbacks.Metrics(ALPHABET, model_summary)
     model_reset = callbacks.ModelReset(model)
-    csv_logger = callbacks.CSVLogger("training.csv", ["epoch", "train_loss", "val_loss", "val_mean_accuracy", "val_median_accuracy", "learning_rate"])
+    lru_logger = callbacks.LRULogger()
+    lru_values = lru_logger(model)
+    csv_logger = callbacks.CSVLogger("training.csv", ["epoch", "train_loss", "val_loss", "val_mean_accuracy", "val_median_accuracy", "learning_rate", "lru_values"])
+    csv_logger({"epoch":0, "train_loss":1000, "val_loss":1000, "val_mean_accuracy":0, "val_median_accuracy":0, "learning_rate":0, "lru_values":lru_values})
     
     train_loss_results = []
     val_loss_results = []
@@ -205,17 +213,21 @@ with tf.device('/GPU:0'):
         
         print("Resets:", model_reset.reset_counter)
         
+        print(f"Loss: {train_loss:.2f}")
+        print(f"Min Loss: {min(train_loss_results):.2f}")
+        print("Last 10 Losses:", [f"{l:.2f}" for l in train_loss_results[-10:]])
+        
         prediction = model.predict(val_chunks)
         metrics.on_epoch_end(prediction, val_targets)
         
         val_mean_accuracy.append(metrics.mean_accuracy)
         val_median_accuracy.append(metrics.median_accuracy)
         
-        print(f"Loss: {train_loss:.2f}")
-        print(f"Min Loss: {min(train_loss_results):.2f}")
-        print("Last 10 Losses:", [f"{l:.2f}" for l in train_loss_results[-10:]])
+        lr = scheduler((epoch+1)*STEPS_PER_EPOCH).numpy()
         
-        csv_logger({"epoch":epoch+1, "train_loss":train_loss, "val_loss":val_loss, "val_mean_accuracy":metrics.mean_accuracy, "val_median_accuracy":metrics.median_accuracy, "learning_rate":scheduler.lr.numpy()})
+        # Log the nu_log and theta_log of each lru layer
+        lru_values = lru_logger(model)
         
-        scheduler.update(train_loss)
-        print("Learning rate:", scheduler.lr.numpy())
+        csv_logger({"epoch":epoch+1, "train_loss":train_loss, "val_loss":val_loss, "val_mean_accuracy":metrics.mean_accuracy, "val_median_accuracy":metrics.median_accuracy, "learning_rate":lr, "lru_values":lru_values})
+        
+        print("Learning rate:", lr)
