@@ -18,7 +18,6 @@ with open("training.csv") as f:
         val_loss.append(float(l[2]))
         val_mean_accuracy.append(float(l[3]))
         val_median_accuracy.append(float(l[4]))
-        lru_values.append(ast.literal_eval(l[6]))
 
 train_loss = np.nan_to_num(train_loss, nan=1000, posinf=1000, neginf=1000)
 train_loss = np.clip(train_loss, a_min=None, a_max=1000)
@@ -87,11 +86,16 @@ def plot_lru_unit_circle(title, nu_log, theta_log):
     plt.close()
 
 def plot_lru_epoch(epoch):
-    entry = lru_values[epoch]
-    for layer in entry.keys():
+    with open("training.csv") as f:
+        next(f)
+        for i, line in enumerate(f):
+            if i == epoch:
+                l = line.split(";")
+                lru_values = ast.literal_eval(l[6])
+    for layer in lru_values.keys():
         title = f"Epoch {epoch+1}; Layer {layer+1};"
-        plot_lru_unit_circle(title + " forward", entry[layer]["nu_fw"], entry[layer]["theta_fw"])
-        plot_lru_unit_circle(title + " reverse", entry[layer]["nu_rv"], entry[layer]["theta_rv"])
+        plot_lru_unit_circle(title + " forward", lru_values[layer]["nu_fw"], lru_values[layer]["theta_fw"])
+        plot_lru_unit_circle(title + " reverse", lru_values[layer]["nu_rv"], lru_values[layer]["theta_rv"])
 
-#plot_lru_epoch(0)
-plot_lru_epoch(len(lru_values)-1)
+plot_lru_epoch(0)
+plot_lru_epoch(epoch[-1])
