@@ -1,3 +1,7 @@
+"""
+Custom callbacks for training.
+"""
+
 import bc_util
 
 import LRU_tf as lru
@@ -8,6 +12,7 @@ import tensorflow as tf
 import json
 import csv
 
+# Calculate and print different training metrics suc as accuracy
 class Metrics:
     
     def __init__(self, alphabet, model_summary):
@@ -31,6 +36,7 @@ class Metrics:
         # decoded_sequences are numbers from 1 to 4, padded with -1
         seqs = [bc_util.decode_ref(self.remove_trailing(target, -1), self.alphabet) for target in decoded_sequences]
         
+		# Only calculate accuracy if the seq length is at least half that of the ref
         accs = [bc_util.accuracy(ref, seq, min_coverage=0.5) if len(seq) else 0. for ref, seq in zip(refs, seqs)]
         
         # Print the model stats to see the number of parameters
@@ -50,6 +56,7 @@ class Metrics:
         print(f"mean_acc = {np.mean(accs):.2f}")
         print(f"median_acc = {np.median(accs):.2f}")
         print("Accuracies:", [f"{acc:.2f}" for acc in accs])
+		# GPU number in case training is done with multiple consoles on multiple GPUs
         print("This is GPU 1!")
         self.mean_accuracy = np.mean(accs)
         self.median_accuracy = np.median(accs)
@@ -75,6 +82,7 @@ class Metrics:
             # Slice up to the first num
             return arr[:indices[0]]
 
+# Save a models weights and reload them
 class ModelReset:
     def __init__(self, model, reset_counter=0):
         model.save_weights("model.weights.h5", overwrite=True)
@@ -87,6 +95,7 @@ class ModelReset:
         model.load_weights("model.weights.h5")
         self.reset_counter += 1
 
+# Log nu_log and theta_log of the LRU layers
 class LRULogger:
     def __call__(self, model):
         layers_ = {}
@@ -101,6 +110,7 @@ class LRULogger:
                 c += 1
         return layers_
 
+# Write different training metrics to a csv file
 class CSVLogger:
     def __init__(self, filename, fieldnames):
         self.filename = filename

@@ -1,3 +1,7 @@
+"""
+Plot different metrics from a csv file.
+"""
+
 import matplotlib.pyplot as plt
 import numpy as np
 import ast
@@ -7,7 +11,6 @@ train_loss = []
 val_loss = []
 val_mean_accuracy = []
 val_median_accuracy = []
-lru_values = []
 
 with open("training.csv") as f:
     next(f)
@@ -24,6 +27,7 @@ train_loss = np.clip(train_loss, a_min=None, a_max=1000)
 val_loss = np.nan_to_num(val_loss, nan=1000, posinf=1000, neginf=1000)
 val_loss = np.clip(val_loss, a_min=None, a_max=1000)
 
+# Plot loss
 plt.plot(epoch, train_loss, label='Training Loss', color='blue', marker='.', markersize=6, linestyle='None')
 plt.plot(epoch, val_loss, label='Validation Loss', color='red', marker='*', markersize=2, linestyle='None')
 plt.axhline(y=200, color='green', linestyle='-', linewidth=1, label='y = 200')
@@ -38,6 +42,7 @@ plt.show()
 plt.clf()
 plt.close()
 
+# Plot accuracy
 plt.plot(epoch, val_mean_accuracy, label='Mean accuracy', color='orange', marker='o', markersize=6, linestyle='None')
 plt.plot(epoch, val_median_accuracy, label='Median accuracy', color='grey', marker='+', markersize=4, linestyle='None')
 plt.axhline(y=85, color='green', linestyle='-', linewidth=1, label='y = 85')
@@ -52,7 +57,7 @@ plt.show()
 plt.clf()
 plt.close()
 
-
+# Plot LRU parameters
 def plot_lru_unit_circle(title, nu_log, theta_log):
     fig, ax = plt.subplots(figsize=(6, 6))
     # Plot the unit circle
@@ -97,5 +102,7 @@ def plot_lru_epoch(epoch):
         plot_lru_unit_circle(title + " forward", lru_values[layer]["nu_fw"], lru_values[layer]["theta_fw"])
         plot_lru_unit_circle(title + " reverse", lru_values[layer]["nu_rv"], lru_values[layer]["theta_rv"])
 
+# Plot initial LRU parameters
 plot_lru_epoch(0)
+# Plot latest LRU parameters
 plot_lru_epoch(epoch[-1])

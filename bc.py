@@ -68,12 +68,12 @@ def build_model():
     x = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.1, epsilon=1e-5)(x)
     tf.keras.mixed_precision.set_global_policy('float32')
     
-    x = lru.LRU_Block(N=256, H=1024, bidirectional=True, max_phase=2*pi/100, dropout=0.9)(x)
-    x = lru.LRU_Block(N=256, H=1024, bidirectional=True, max_phase=2*pi/100, dropout=0.9)(x)
-    x = lru.LRU_Block(N=256, H=1024, bidirectional=True, max_phase=2*pi/100, dropout=0.9)(x)
-    x = lru.LRU_Block(N=256, H=1024, bidirectional=True, max_phase=2*pi/100, dropout=0.9)(x)
-    x = lru.LRU_Block(N=256, H=1024, bidirectional=True, max_phase=2*pi/100, dropout=0.9)(x)
-    x = lru.LRU_Block(N=256, H=1024, bidirectional=True, max_phase=2*pi/100, dropout=0.9)(x)
+    x = lru.LRU_Block(N=256, H=1024, bidirectional=True, max_phase=2*pi/100, dropout=0)(x)
+    x = lru.LRU_Block(N=256, H=1024, bidirectional=True, max_phase=2*pi/100, dropout=0)(x)
+    x = lru.LRU_Block(N=256, H=1024, bidirectional=True, max_phase=2*pi/100, dropout=0)(x)
+    x = lru.LRU_Block(N=256, H=1024, bidirectional=True, max_phase=2*pi/100, dropout=0)(x)
+    x = lru.LRU_Block(N=256, H=1024, bidirectional=True, max_phase=2*pi/100, dropout=0)(x)
+    x = lru.LRU_Block(N=256, H=1024, bidirectional=True, max_phase=2*pi/100, dropout=0)(x)
     
     # Output layer - logits for each time step
     classes = tf.keras.layers.Dense(NUM_CLASSES, use_bias=True, dtype=tf.float32)(x)
@@ -84,9 +84,9 @@ def build_model():
 
 # Compile and train the model
 class CTCModel(tf.keras.Model):
-    def __init__(self):
+    def __init__(self, model):
         super(CTCModel, self).__init__()
-        self.base_model = build_model()
+        self.base_model = model
     
     @tf.function
     def call(self, inputs):
@@ -126,13 +126,15 @@ class CTCModel(tf.keras.Model):
 
 with tf.device('/GPU:0'):
     
+	# Learning rate scheduling
     scheduler = schedulers.WarmUpCosineDecayWithRestarts(
         warmup_initial=1e-8, warmup_end=1e-5, warmup_steps=400000,
         initial_learning_rate=2e-4, decay_steps=4200000, alpha=0.45, t_mul=1.5, m_mul=0.96)
     optimizer = tf.keras.optimizers.AdamW(learning_rate=scheduler, weight_decay=0.005)
     
     # Initialise the model and optimizer
-    model = CTCModel()
+	m = build_model()
+    model = CTCModel(m)
     model.compile(optimizer=optimizer)
     
     model_summary = bc_util.model_summary_to_string(model)
@@ -153,6 +155,7 @@ with tf.device('/GPU:0'):
     lru_logger = callbacks.LRULogger()
     lru_values = lru_logger(model)
     csv_logger = callbacks.CSVLogger("training.csv", ["epoch", "train_loss", "val_loss", "val_mean_accuracy", "val_median_accuracy", "learning_rate", "lru_values"])
+	# Log for initial LRU parameters
     csv_logger({"epoch":0, "train_loss":1000, "val_loss":1000, "val_mean_accuracy":0, "val_median_accuracy":0, "learning_rate":0, "lru_values":lru_values})
     
     train_loss_results = []
@@ -177,6 +180,7 @@ with tf.device('/GPU:0'):
                 train_metrics = model.train_step(chunks, targets, target_lengths)
                 loss = train_metrics['loss'].numpy()
                 
+				# Reset model on NaN loss
                 if np.isnan(loss):
                     print(f"NaN detected in training loss at step {step}, restoring previous weights.")
                     model_reset.load(model)
@@ -191,6 +195,7 @@ with tf.device('/GPU:0'):
                 pbar.set_postfix(loss=f"{loss:.2f}", step_time=f"{step_time*1000:.0f} ms")
                 pbar.update(1)  # Increment the progress bar by 1 step
         
+		# Save the model after each epoch
         model_reset.save(model)
                 
         # Average the training loss
@@ -224,10 +229,10 @@ with tf.device('/GPU:0'):
         val_median_accuracy.append(metrics.median_accuracy)
         
         lr = scheduler((epoch+1)*STEPS_PER_EPOCH).numpy()
+		print("Learning rate:", lr)
         
         # Log the nu_log and theta_log of each lru layer
         lru_values = lru_logger(model)
         
         csv_logger({"epoch":epoch+1, "train_loss":train_loss, "val_loss":val_loss, "val_mean_accuracy":metrics.mean_accuracy, "val_median_accuracy":metrics.median_accuracy, "learning_rate":lr, "lru_values":lru_values})
-        
-        print("Learning rate:", lr)
+

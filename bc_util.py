@@ -1,3 +1,9 @@
+"""
+Contains utility functions.
+Contains the implementation to calculate the accuracy,
+copied from bonito basecaller for comparability.
+"""
+
 import numpy as np
 import tensorflow as tf
 
@@ -5,49 +11,7 @@ import re
 import parasail
 from collections import defaultdict
 
-"""
-Contains utility functions
-and
-the implementation to calculate the accuracy,
-copied from bonito basecaller for comparability
-"""
-
 split_cigar = re.compile(r"(?P<len>\d+)(?P<op>\D+)")
-
-class CosineDecaySchedule(tf.keras.optimizers.schedules.LearningRateSchedule):
-    def __init__(self, initial_lr, final_lr, decay_steps):
-        super(CosineDecaySchedule, self).__init__()
-        self.initial_lr = initial_lr
-        self.final_lr = final_lr
-        self.decay_steps = decay_steps
-
-    def __call__(self, step):
-        step = tf.cast(step, tf.float32)
-        decay_steps = tf.cast(self.decay_steps, tf.float32)
-        cosine_decay = 0.5 * (tf.cos(np.pi * step / decay_steps) + 1.0)
-        decayed_lr = (self.initial_lr - self.final_lr) * cosine_decay + self.final_lr
-        return decayed_lr
-
-def get_learning_rate(initial_lr=1e-4, final_lr=1e-6, decay_steps=100, epochs=None, steps_per_epoch=None):
-    if (epochs != None and steps_per_epoch != None):
-        decay_steps = epochs * steps_per_epoch
-    return CosineDecaySchedule(initial_lr, final_lr, decay_steps)
-    
-class LinearDecayScheduler(tf.keras.optimizers.schedules.LearningRateSchedule):
-    def __init__(self, initial_learning_rate, final_learning_rate, total_epochs, steps_per_epoch):
-        self.initial_learning_rate = initial_learning_rate
-        self.final_learning_rate = final_learning_rate
-        self.total_steps = total_epochs * steps_per_epoch  # Total number of steps across all epochs
-
-    def __call__(self, step):
-        # Cast the current step as float
-        step = tf.cast(step, tf.float32)
-
-        # Linear decay formula based on the step
-        decayed_learning_rate = self.initial_learning_rate - \
-            (step / self.total_steps) * (self.initial_learning_rate - self.final_learning_rate)
-
-        return decayed_learning_rate
 
 def decode_ref(encoded, labels):
     """
@@ -115,4 +79,3 @@ def model_summary_to_string(model):
     summary_lines = []
     model.summary(print_fn=lambda x: summary_lines.append(x))
     return "\n".join(summary_lines)
-

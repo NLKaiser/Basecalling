@@ -1,8 +1,21 @@
+"""
+Script to convert a numpy training dataset to tfrecords.
+Initial data structure:
+- example_data_dna_r10.4.1_v0
+  - chunks.npy (1.000.000, 5.000) # Sensor measurements
+  - references.npy (1.000.000, 500) # Reference sequence encoded (1-4) with zero padding
+  - reference_lengths.npy (1.000.000) # Length of the reference sequence
+  - validation
+    - chunks.npy (50.000, 5.000)
+    - references.npy (50.000, 500)
+    - reference_lengths.npy (50.000)
+"""
+
 import numpy as np
 import tensorflow as tf
 
 def serialize_sparse_example(chunk, sparse_reference, reference_length):
-    # Convert sparse tensor to components
+    # Sparse tensor components
     indices = sparse_reference.indices.numpy().astype(np.int64)
     values = sparse_reference.values.numpy()
     dense_shape = sparse_reference.dense_shape.numpy().astype(np.int64)
@@ -13,6 +26,7 @@ def serialize_sparse_example(chunk, sparse_reference, reference_length):
     # Flatten indices for serialization
     flattened_indices = indices.flatten()
     
+	# Define one entry
     feature = {
         'chunk': tf.train.Feature(float_list=tf.train.FloatList(value=chunk)),
         'reference_indices': tf.train.Feature(int64_list=tf.train.Int64List(value=flattened_indices)),
