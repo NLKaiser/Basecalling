@@ -1,19 +1,14 @@
-"""
-Custom layers.
-"""
-
 import tensorflow as tf
 
-# Reverse an input along an axis
 class ReverseLayer(tf.keras.layers.Layer):
     def __init__(self, axis=-1, **kwargs):
         super(ReverseLayer, self).__init__(**kwargs)
         self.axis = axis  # The axis to reverse along, default is the last axis
     
     def call(self, inputs):
+        # Reverse the input tensor along the specified axis
         return tf.reverse(inputs, axis=[self.axis])
 
-# Cast the input to a specific datatype
 class CastToFloat32(tf.keras.layers.Layer):
     def __init__(self):
         super(CastToFloat32, self).__init__()
@@ -21,7 +16,6 @@ class CastToFloat32(tf.keras.layers.Layer):
     def call(self, inputs):
         return tf.cast(inputs, tf.float32)
 
-# Clip the inputs values
 class ClipLayer(tf.keras.layers.Layer):
     def __init__(self, min_, max_):
         super(ClipLayer, self).__init__()
@@ -31,7 +25,6 @@ class ClipLayer(tf.keras.layers.Layer):
     def call(self, inputs):
         return tf.clip_by_value(inputs, self.min, self.max)
 
-# Pad the inputs time dimension specific for division by 6
 class DynamicPaddingLayer(tf.keras.layers.Layer):
     def __init__(self):
         super(DynamicPaddingLayer, self).__init__()
@@ -63,9 +56,6 @@ class DynamicPaddingLayer(tf.keras.layers.Layer):
         padded_inputs = tf.pad(inputs, paddings, mode='CONSTANT')
         return padded_inputs
 
-# Stack the state dimension of the previous n time steps, time step n and the next n time steps for each time step i
-# Padding is applied as needed
-# New state dimension is 2n + 1
 class TemporalContextLayer(tf.keras.layers.Layer):
     def __init__(self, n, **kwargs):
         super(TemporalContextLayer, self).__init__(**kwargs)
@@ -79,7 +69,7 @@ class TemporalContextLayer(tf.keras.layers.Layer):
 
         # Use a 1D convolution to create the sliding window of size (2n + 1)
         # This will create overlapping windows of shape (2n + 1) for each time step
-        # Use filters=1 to apply the kernel across the single input channel
+        # We use filters=1 to apply the kernel across the single input channel
         window_size = 2 * self.n + 1
         output = tf.image.extract_patches(
             images=tf.expand_dims(padded_inputs, -1),  # Expand dims to make it compatible with extract_patches

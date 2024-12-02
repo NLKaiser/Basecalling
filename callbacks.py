@@ -1,7 +1,3 @@
-"""
-Custom callbacks for training.
-"""
-
 import bc_util
 
 import LRU_tf as lru
@@ -12,19 +8,19 @@ import tensorflow as tf
 import json
 import csv
 
-# Calculate and print different training metrics suc as accuracy
 class Metrics:
     
     def __init__(self, alphabet, model_summary):
         self.alphabet = alphabet
         self.model_summary = model_summary
         
-        self.mean_accuracy = 0
-        self.median_accuracy = 0
+        self.accuracy_original = [0]
+        self.accuracy_global = [0]
+        self.accuracy_pairwise = [0]
         
         self.max_mean_accuracy = 0
     
-    def on_epoch_end(self, prediction, targets):
+    def batch_accuracy(self, prediction, targets, original=True, global_=True, pairwise=True):
         val_targets = tf.sparse.to_dense(targets, default_value=0)
         val_targets = val_targets.numpy()
         
@@ -36,30 +32,51 @@ class Metrics:
         # decoded_sequences are numbers from 1 to 4, padded with -1
         seqs = [bc_util.decode_ref(self.remove_trailing(target, -1), self.alphabet) for target in decoded_sequences]
         
-		# Only calculate accuracy if the seq length is at least half that of the ref
-        accs = [bc_util.accuracy(ref, seq, min_coverage=0.5) if len(seq) else 0. for ref, seq in zip(refs, seqs)]
-        
+        if original:
+            accs_original = [bc_util.accuracy(ref, seq, min_coverage=0.5) if len(seq) else 0. for ref, seq in zip(refs, seqs)]
+            self.accuracy_original = accs_original
+        if global_:
+            accs_global = [bc_util.accuracy_global(ref, seq, min_coverage=0.5) if len(seq) else 0. for ref, seq in zip(refs, seqs)]
+            self.accuracy_global = accs_global
+        if pairwise:
+            accs_pairwise = [bc_util.accuracy_pairwise(ref, seq, min_coverage=0.5) if len(seq) else 0. for ref, seq in zip(refs, seqs)]
+            self.accuracy_pairwise = accs_pairwise
+    
+    def print_statistics(self, type_, stats, summary=True, original=True, global_=True, pairwise=True):
         # Print the model stats to see the number of parameters
-        print(self.model_summary)
-        # Print some of the decoded arrays together with the expected output
-        #for i in range(1):    #(max(1, min(2, int(len(decoded_sequences)/8)))):
-        #    seq = self.remove_trailing(decoded_sequences[i], -1)
-        #    valid = self.remove_trailing(val_targets[i], 0)
-        #    print("Original:", valid)
-        #    print("Original length:", len(valid))
-        #    print("Prediction:", seq)
-        #    print("Prediction length:", len(seq))
-        # Max accuracy during training
-        self.max_mean_accuracy = max(self.max_mean_accuracy, np.mean(accs))
-        # Print training statistics
-        print(f"Max mean accuracy over training: {self.max_mean_accuracy:.2f}")
-        print(f"mean_acc = {np.mean(accs):.2f}")
-        print(f"median_acc = {np.median(accs):.2f}")
-        print("Accuracies:", [f"{acc:.2f}" for acc in accs])
-		# GPU number in case training is done with multiple consoles on multiple GPUs
-        print("This is GPU 1!")
-        self.mean_accuracy = np.mean(accs)
-        self.median_accuracy = np.median(accs)
+        if summary:
+            print(self.model_summary)
+        # Training statistics
+        if type_ == "training":
+            print("Trainings statistics:")
+            print(f"Loss: {stats['loss']:.2f}")
+        # Validation statistics
+        if type_ == "validation":
+            print("Validation statistics:")
+            print(f"Loss: {stats['loss']:.2f}")
+            if original:
+                print(f"Mean accuracy original: {stats['mean_accuracy_original']:.2f}")
+                print(f"Median accuracy original: {stats['median_accuracy_original']:.2f}")
+            if global_:
+                print(f"Mean accuracy global: {stats['mean_accuracy_global']:.2f}")
+                print(f"Median accuracy global: {stats['median_accuracy_global']:.2f}")
+            if pairwise:
+                print(f"Mean accuracy pairwise: {stats['mean_accuracy_pairwise']:.2f}")
+                print(f"Median accuracy pairwise: {stats['median_accuracy_pairwise']:.2f}")
+    
+    # Return one prediction and reference globally aligned and as it is done in bonito
+    def alignment_comparison(self, prediction, reference):
+        reference = tf.sparse.to_dense(reference, default_value=0)
+        reference = reference.numpy()[0]
+        reference = bc_util.decode_ref(self.remove_trailing(reference, 0), self.alphabet)
+        prediction = prediction[:1, :, :]
+        prediction = self.decode_predictions(prediction)[0]
+        prediction = bc_util.decode_ref(self.remove_trailing(prediction, -1), self.alphabet)
+        alignment_original = bc_util.alignment_local(prediction, reference)
+        alignment_global = bc_util.alignment_global(prediction, reference)
+        return {"pred_original":alignment_original.traceback.query, "ref_original":alignment_original.traceback.ref,
+                "pred_global":alignment_global.traceback.query, "ref_global":alignment_global.traceback.ref}
+        
     
     def decode_predictions(self, logits):
         # Get the length of each sequence in the batch
@@ -82,7 +99,6 @@ class Metrics:
             # Slice up to the first num
             return arr[:indices[0]]
 
-# Save a models weights and reload them
 class ModelReset:
     def __init__(self, model, reset_counter=0):
         model.save_weights("model.weights.h5", overwrite=True)
@@ -95,7 +111,6 @@ class ModelReset:
         model.load_weights("model.weights.h5")
         self.reset_counter += 1
 
-# Log nu_log and theta_log of the LRU layers
 class LRULogger:
     def __call__(self, model):
         layers_ = {}
@@ -110,7 +125,6 @@ class LRULogger:
                 c += 1
         return layers_
 
-# Write different training metrics to a csv file
 class CSVLogger:
     def __init__(self, filename, fieldnames):
         self.filename = filename

@@ -44,9 +44,9 @@ np.set_printoptions(threshold=514)
 # Data directory
 directory = "./"
 # Hyperparameters
-BATCH_SIZE = 16
-EPOCHS = 5120
-STEPS_PER_EPOCH = 1000
+BATCH_SIZE = 32
+EPOCHS = 512
+STEPS_PER_EPOCH = 1000000/BATCH_SIZE
 CHUNK_LENGTH = 5000
 TARGET_LENGTH = 500
 ALPHABET = ["N", "A", "C", "G","T"]
@@ -57,7 +57,7 @@ pi = 3.14
 
 # The model structure
 def build_model():
-    inputs = tf.keras.Input(shape=(CHUNK_LENGTH, 1))  # Input shape is (5000, 1) for sensor readings
+    inputs = tf.keras.Input(shape=(None, 1))  # Input shape is (5000, 1) for sensor readings
     
     tf.keras.mixed_precision.set_global_policy('mixed_float16')
     x = tf.keras.layers.Conv1D(16, kernel_size=5, activation='swish', padding='same', use_bias=True)(inputs)
@@ -68,12 +68,12 @@ def build_model():
     x = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.1, epsilon=1e-5)(x)
     tf.keras.mixed_precision.set_global_policy('float32')
     
-    x = lru.LRU_Block(N=256, H=1024, bidirectional=True, max_phase=2*pi/100, dropout=0)(x)
-    x = lru.LRU_Block(N=256, H=1024, bidirectional=True, max_phase=2*pi/100, dropout=0)(x)
-    x = lru.LRU_Block(N=256, H=1024, bidirectional=True, max_phase=2*pi/100, dropout=0)(x)
-    x = lru.LRU_Block(N=256, H=1024, bidirectional=True, max_phase=2*pi/100, dropout=0)(x)
-    x = lru.LRU_Block(N=256, H=1024, bidirectional=True, max_phase=2*pi/100, dropout=0)(x)
-    x = lru.LRU_Block(N=256, H=1024, bidirectional=True, max_phase=2*pi/100, dropout=0)(x)
+    x = lru.LRU_Block(N=256, H=1024, bidirectional=True, max_phase=2*pi/3, r_min=0.9, r_max=0.98, dropout=0)(x)
+    x = lru.LRU_Block(N=256, H=1024, bidirectional=True, max_phase=2*pi/3, r_min=0.68, r_max=0.75, dropout=0)(x)
+    x = lru.LRU_Block(N=256, H=1024, bidirectional=True, max_phase=2*pi/3, r_min=0.68, r_max=0.75, dropout=0)(x)
+    x = lru.LRU_Block(N=256, H=1024, bidirectional=True, max_phase=2*pi/3, r_min=0.68, r_max=0.75, dropout=0)(x)
+    x = lru.LRU_Block(N=256, H=1024, bidirectional=True, max_phase=2*pi/3, r_min=0.68, r_max=0.75, dropout=0)(x)
+    x = lru.LRU_Block(N=256, H=1024, bidirectional=True, max_phase=2*pi/4, r_min=0.68, r_max=0.75, dropout=0)(x)
     
     # Output layer - logits for each time step
     classes = tf.keras.layers.Dense(NUM_CLASSES, use_bias=True, dtype=tf.float32)(x)
@@ -84,15 +84,16 @@ def build_model():
 
 # Compile and train the model
 class CTCModel(tf.keras.Model):
-    def __init__(self, model):
+    def __init__(self, model, batch_size):
         super(CTCModel, self).__init__()
         self.base_model = model
+        #self.scale = False
     
     @tf.function
     def call(self, inputs):
         return self.base_model(inputs)
     
-    @tf.function(autograph=True)
+    @tf.function
     def train_step(self, chunks, targets, target_lengths):
         with tf.GradientTape() as tape:
             logits = self(chunks, training=True)
@@ -106,6 +107,16 @@ class CTCModel(tf.keras.Model):
         
         # Compute gradients
         gradients = tape.gradient(loss, self.trainable_variables)
+        
+        # Optional scaling
+        #if self.scale == True:
+        #    #to_scale = ["nu_log", "theta_log", "B_re", "B_im", "C_re", "C_im"]
+        #    to_scale = ["nu_log", "theta_log"]
+        #    scaled_gradients = [
+        #        grad * 10 if var.name in to_scale else grad
+        #        for grad, var in zip(gradients, self.trainable_variables)
+        #    ]
+        #    gradients = scaled_gradients
         
         # Apply gradients
         self.optimizer.apply_gradients(zip(gradients, self.trainable_variables))
@@ -122,52 +133,96 @@ class CTCModel(tf.keras.Model):
         loss = tf.reduce_mean(tf.nn.ctc_loss(labels=targets, logits=logits, label_length=target_lengths, logit_length=input_lengths, logits_time_major=True, blank_index=0))
         
         return {"validation_loss": loss}
+    
+    @tf.function
+    def predict(self, chunks):
+        logits = self(chunks, training=False)
+        return logits
 
 
 with tf.device('/GPU:0'):
     
-	# Learning rate scheduling
     scheduler = schedulers.WarmUpCosineDecayWithRestarts(
-        warmup_initial=1e-8, warmup_end=1e-5, warmup_steps=400000,
-        initial_learning_rate=2e-4, decay_steps=4200000, alpha=0.45, t_mul=1.5, m_mul=0.96)
-    optimizer = tf.keras.optimizers.AdamW(learning_rate=scheduler, weight_decay=0.005)
+        warmup_initial=8e-5, warmup_end=1e-4, warmup_steps=100000,
+        initial_learning_rate=1e-4, decay_steps=3200000, alpha=0.6, t_mul=0.06, m_mul=0.5)
+    optimizer = tf.keras.optimizers.AdamW(learning_rate=scheduler, weight_decay=0.01)
     
     # Initialise the model and optimizer
-	m = build_model()
-    model = CTCModel(m)
+    m = build_model()
+    model = CTCModel(m, BATCH_SIZE)
     model.compile(optimizer=optimizer)
-    
-    model_summary = bc_util.model_summary_to_string(model)
-    print(model_summary)
     
     # Read in the dataset
     train_dataset = data.load_tfrecords(directory + "train_data.tfrecord", batch_size=BATCH_SIZE, shuffle=True, repeat=True)
     train_iter = iter(train_dataset)
-    valid_dataset = data.load_tfrecords(directory + "valid_data.tfrecord", batch_size=BATCH_SIZE, shuffle=False, repeat=True)
-    valid_iter = iter(valid_dataset)
+    valid_dataset = data.load_tfrecords(directory + "valid_data.tfrecord", batch_size=BATCH_SIZE, shuffle=False, repeat=False)
+    valid_dataset_length = sum(1 for _ in iter(valid_dataset))
     
-    # Fit the model using the dataset
-    #model.fit(train_dataset, shuffle=False, validation_data=valid_dataset, epochs=EPOCHS, steps_per_epoch=STEPS_PER_EPOCH, validation_steps=1, callbacks=[CustomMetricsCallback(model_summary, valid_dataset)])
+    model_summary = bc_util.model_summary_to_string(model)
+    print(model_summary)
     
     # Initialise callbacks
     metrics = callbacks.Metrics(ALPHABET, model_summary)
     model_reset = callbacks.ModelReset(model)
     lru_logger = callbacks.LRULogger()
     lru_values = lru_logger(model)
-    csv_logger = callbacks.CSVLogger("training.csv", ["epoch", "train_loss", "val_loss", "val_mean_accuracy", "val_median_accuracy", "learning_rate", "lru_values"])
-	# Log for initial LRU parameters
-    csv_logger({"epoch":0, "train_loss":1000, "val_loss":1000, "val_mean_accuracy":0, "val_median_accuracy":0, "learning_rate":0, "lru_values":lru_values})
+    csv_logger = callbacks.CSVLogger("training.csv", ["epoch", "train_loss", "val_loss", "val_mean_accuracy", "val_median_accuracy", "learning_rate", "lru_values", "alignments"])
+    csv_logger({"epoch":0, "train_loss":0, "val_loss":0, "val_mean_accuracy":0, "val_median_accuracy":0, "learning_rate":1e-4, "lru_values":lru_values, "alignments":""})
     
     train_loss_results = []
     val_loss_results = []
     val_mean_accuracy = []
     val_median_accuracy = []
     
+    def validation_step(batch, original, global_, pairwise):
+        val_chunks, val_targets, val_target_lengths = batch
+        
+        # Calculate validation loss
+        val_metrics = model.test_step(val_chunks, val_targets, val_target_lengths)
+        try:
+            val_loss = val_metrics['validation_loss'].numpy()
+        except:
+            val_loss = 1000
+        
+        prediction = model.predict(val_chunks)
+        # Calculate validation accuracy
+        metrics.batch_accuracy(prediction, val_targets, original=original, global_=global_, pairwise=pairwise)
+        
+        accuracy_original = metrics.accuracy_original
+        accuracy_global = metrics.accuracy_global
+        accuracy_pairwise = metrics.accuracy_pairwise
+        
+        return val_loss, accuracy_original, accuracy_global, accuracy_pairwise
+        
+    def validate_epoch(original, global_, pairwise):
+        valid_iter = iter(valid_dataset)
+        losses = []
+        accuracy_original = []
+        accuracy_global = []
+        accuracy_pairwise = []
+        with tqdm(total=valid_dataset_length, desc="Validation", unit="batch") as pbar:
+            for batch in valid_iter:
+                start_time = time.time()
+                l, ao, ag, ap = validation_step(batch, original, global_, pairwise)
+                losses.append(l)
+                accuracy_original.extend(ao)
+                accuracy_global.extend(ag)
+                accuracy_pairwise.extend(ap)
+                batch_time = time.time() - start_time
+                # Update the progress bar
+                pbar.set_postfix(loss=f"{l:.2f}", batch_time=f"{batch_time*1000:.0f} ms")
+                pbar.update(1)  # Increment the progress bar by 1 step
+        return (np.mean(losses),
+                np.mean(accuracy_original), np.median(accuracy_original),
+                np.mean(accuracy_global), np.median(accuracy_global),
+                np.mean(accuracy_pairwise), np.median(accuracy_pairwise))
+    
     # Custom training loop
     for epoch in range(EPOCHS):
         print(f"Epoch {epoch+1}/{EPOCHS}")
         train_loss = 0.0
         val_loss = 0.0
+        model_resetable = True
         with tqdm(total=STEPS_PER_EPOCH, desc=f"Epoch {epoch+1}", unit="step") as pbar:
             for step in range(STEPS_PER_EPOCH):
                 start_time = time.time()
@@ -178,15 +233,17 @@ with tf.device('/GPU:0'):
                 
                 # Training step
                 train_metrics = model.train_step(chunks, targets, target_lengths)
-                loss = train_metrics['loss'].numpy()
+                try:
+                    loss = train_metrics['loss'].numpy()
+                except:
+                    loss = 1000
                 
-				# Reset model on NaN loss
                 if np.isnan(loss):
                     print(f"NaN detected in training loss at step {step}, restoring previous weights.")
                     model_reset.load(model)
+                    model_resetable = False
                     continue
                 
-                # Calculate the elapsed time for this step
                 step_time = time.time() - start_time
                 
                 train_loss += loss
@@ -195,44 +252,38 @@ with tf.device('/GPU:0'):
                 pbar.set_postfix(loss=f"{loss:.2f}", step_time=f"{step_time*1000:.0f} ms")
                 pbar.update(1)  # Increment the progress bar by 1 step
         
-		# Save the model after each epoch
-        model_reset.save(model)
-                
+        # Save the model after each epoch if it has not been resetted that epoch
+        if model_resetable:
+            model_reset.save(model)
+        print("Resets:", model_reset.reset_counter)
+        
         # Average the training loss
         train_loss /= STEPS_PER_EPOCH
         train_loss_results.append(train_loss)
         
-        print(f"Train Loss: {train_loss:.2f}")
-        
-        val_batch = next(valid_iter)
-        
-        val_chunks, val_targets, val_target_lengths = val_batch
-        
-        # Perform a validation step
-        val_metrics = model.test_step(val_chunks, val_targets, val_target_lengths)
-        val_loss = val_metrics['validation_loss'].numpy()
-        
-        val_loss_results.append(val_loss)
-        
-        print(f"Validation Loss: {val_loss:.2f}")
-        
-        print("Resets:", model_reset.reset_counter)
-        
-        print(f"Loss: {train_loss:.2f}")
+        # Print training statistics
+        metrics.print_statistics("training", {"loss":train_loss}, summary=True)
         print(f"Min Loss: {min(train_loss_results):.2f}")
         print("Last 10 Losses:", [f"{l:.2f}" for l in train_loss_results[-10:]])
         
-        prediction = model.predict(val_chunks)
-        metrics.on_epoch_end(prediction, val_targets)
+        # Validation
+        val_loss, mean_accuracy_original, median_accuracy_original, mean_accuracy_global, median_accuracy_global, mean_accuracy_pairwise, median_accuracy_pairwise = validate_epoch(original=True, global_=False, pairwise=False)
+        val_loss_results.append(val_loss)
+        # Print validation statistics
+        metrics.print_statistics("validation", {"loss":val_loss, "mean_accuracy_original":mean_accuracy_original, "median_accuracy_original":median_accuracy_original, "mean_accuracy_global":mean_accuracy_global, "median_accuracy_global":median_accuracy_global, "mean_accuracy_pairwise":mean_accuracy_pairwise, "median_accuracy_pairwise":median_accuracy_pairwise}, summary=False, original=True, global_=False, pairwise=False)
         
-        val_mean_accuracy.append(metrics.mean_accuracy)
-        val_median_accuracy.append(metrics.median_accuracy)
+        # Alignment
+        val_chunks, val_targets, _ = iter(valid_dataset).next()
+        alignments = str(metrics.alignment_comparison(model.predict(val_chunks), val_targets))
         
+        # Get the learning rate
         lr = scheduler((epoch+1)*STEPS_PER_EPOCH).numpy()
-		print("Learning rate:", lr)
+        # Only needed for custom scheduler
+        #scheduler.update(train_loss)
+        print("Learning rate:", lr)
         
         # Log the nu_log and theta_log of each lru layer
         lru_values = lru_logger(model)
         
-        csv_logger({"epoch":epoch+1, "train_loss":train_loss, "val_loss":val_loss, "val_mean_accuracy":metrics.mean_accuracy, "val_median_accuracy":metrics.median_accuracy, "learning_rate":lr, "lru_values":lru_values})
-
+        # Write csv log
+        csv_logger({"epoch":epoch+1, "train_loss":train_loss, "val_loss":val_loss, "val_mean_accuracy":mean_accuracy_original, "val_median_accuracy":median_accuracy_original, "learning_rate":lr, "lru_values":lru_values, "alignments":alignments})

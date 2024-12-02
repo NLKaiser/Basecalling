@@ -1,11 +1,7 @@
-"""
-Read the tfrecords files.
-"""
-
 import tensorflow as tf
 
 def _parse_function(proto):
-    # Read in the data as it is saved in the tfrecords file
+    # Define your feature description dictionary
     feature_description = {
         'chunk': tf.io.FixedLenFeature([5000], tf.float32),  # Assuming chunk has a fixed size of 5000
         'reference_indices': tf.io.VarLenFeature(tf.int64),  # Sparse tensor indices
@@ -14,7 +10,7 @@ def _parse_function(proto):
         'reference_length': tf.io.FixedLenFeature([], tf.int64),  # Reference length
     }
     
-    # Parse the input using the dictionary
+    # Parse the input tf.Example proto using the dictionary
     parsed_features = tf.io.parse_single_example(proto, feature_description)
     
     # Extract indices and reshape them to [num_non_zero_elements, 1] for sparse tensor
@@ -29,19 +25,20 @@ def _parse_function(proto):
     
     #reference = tf.sparse.to_dense(reference)
     
-    # Convert chunk
+    # Convert chunk and reference_length
     chunk = tf.cast(parsed_features['chunk'], tf.float32)
-    # The target_lengths in the original train dataset are offset by 7
+    # For some reason the target_lengths in the train dataset are offset by 7!
     length = tf.minimum(parsed_features['reference_length'] + 7, 500)
-	# Convert reference_length
     reference_length = tf.cast(length, tf.int32)
     
     return chunk, reference, reference_length
 
-# Data loading
 def load_tfrecords(tfrecord_file_path, batch_size=32, shuffle=False, repeat=False):
     # Create a dataset from the TFRecord file
     dataset = tf.data.TFRecordDataset(tfrecord_file_path)
+    
+    # Map the parsing function over the dataset
+    dataset = dataset.map(_parse_function, num_parallel_calls=tf.data.experimental.AUTOTUNE)
     
     if shuffle:
         # Shuffle the dataset
@@ -50,9 +47,6 @@ def load_tfrecords(tfrecord_file_path, batch_size=32, shuffle=False, repeat=Fals
     if repeat:
         # Repeat dataset indefinitely
         dataset = dataset.repeat()
-    
-    # Map the parsing function over the dataset
-    dataset = dataset.map(_parse_function, num_parallel_calls=tf.data.experimental.AUTOTUNE)
     
     # Batch the dataset
     dataset = dataset.batch(batch_size, num_parallel_calls=tf.data.experimental.AUTOTUNE)
