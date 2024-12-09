@@ -64,7 +64,7 @@ def build_model():
     x = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.1, epsilon=1e-5)(x)
     x = tf.keras.layers.Conv1D(16, kernel_size=5, activation='swish', padding='same', use_bias=True)(x)
     x = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.1, epsilon=1e-5)(x)
-    x = tf.keras.layers.Conv1D(384, kernel_size=19, strides=6, activation='tanh', padding='same', use_bias=True)(x)
+    x = tf.keras.layers.Conv1D(1024, kernel_size=19, strides=6, activation='tanh', padding='same', use_bias=True)(x)
     x = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.1, epsilon=1e-5)(x)
     tf.keras.mixed_precision.set_global_policy('float32')
     
@@ -143,14 +143,15 @@ class CTCModel(tf.keras.Model):
 with tf.device('/GPU:0'):
     
     scheduler = schedulers.WarmUpCosineDecayWithRestarts(
-        warmup_initial=8e-5, warmup_end=1e-4, warmup_steps=100000,
-        initial_learning_rate=1e-4, decay_steps=3200000, alpha=0.6, t_mul=0.06, m_mul=0.5)
-    optimizer = tf.keras.optimizers.AdamW(learning_rate=scheduler, weight_decay=0.01)
+        warmup_initial=8e-5, warmup_end=1e-4, warmup_steps=31250,
+        initial_learning_rate=2e-4, decay_steps=70*31250, alpha=0.6, t_mul=0.06, m_mul=0.5)
+    optimizer = tf.keras.optimizers.AdamW(learning_rate=scheduler, weight_decay=0.002)
     
     # Initialise the model and optimizer
     m = build_model()
     model = CTCModel(m, BATCH_SIZE)
     model.compile(optimizer=optimizer)
+    model.build((None,1))
     
     # Read in the dataset
     train_dataset = data.load_tfrecords(directory + "train_data.tfrecord", batch_size=BATCH_SIZE, shuffle=True, repeat=True)
@@ -166,8 +167,8 @@ with tf.device('/GPU:0'):
     model_reset = callbacks.ModelReset(model)
     lru_logger = callbacks.LRULogger()
     lru_values = lru_logger(model)
-    csv_logger = callbacks.CSVLogger("training.csv", ["epoch", "train_loss", "val_loss", "val_mean_accuracy", "val_median_accuracy", "learning_rate", "lru_values", "alignments"])
-    csv_logger({"epoch":0, "train_loss":0, "val_loss":0, "val_mean_accuracy":0, "val_median_accuracy":0, "learning_rate":1e-4, "lru_values":lru_values, "alignments":""})
+    csv_logger = callbacks.CSVLogger("training.csv", ["epoch", "train_loss", "val_loss", "val_mean_accuracy", "val_median_accuracy", "learning_rate", "lru_values", "alignments", "logits"])
+    csv_logger({"epoch":0, "train_loss":0, "val_loss":0, "val_mean_accuracy":0, "val_median_accuracy":0, "learning_rate":0, "lru_values":lru_values, "alignments":"", "logits":""})
     
     train_loss_results = []
     val_loss_results = []
@@ -272,9 +273,26 @@ with tf.device('/GPU:0'):
         # Print validation statistics
         metrics.print_statistics("validation", {"loss":val_loss, "mean_accuracy_original":mean_accuracy_original, "median_accuracy_original":median_accuracy_original, "mean_accuracy_global":mean_accuracy_global, "median_accuracy_global":median_accuracy_global, "mean_accuracy_pairwise":mean_accuracy_pairwise, "median_accuracy_pairwise":median_accuracy_pairwise}, summary=False, original=True, global_=False, pairwise=False)
         
+        # Get four elements from the validation dataset
+        validation_elements = bc_util.get_iter_elements(iter(valid_dataset), [0, 256, 1024, 1486])
+        
         # Alignment
-        val_chunks, val_targets, _ = iter(valid_dataset).next()
-        alignments = str(metrics.alignment_comparison(model.predict(val_chunks), val_targets))
+        alignments_list = []
+        for valid_elem in validation_elements:
+            val_chunks = valid_elem[0]
+            val_targets = valid_elem[1]
+            alignments_list.append(metrics.alignment_comparison(model.predict(val_chunks), val_targets))
+        alignments_list = str(alignments_list)
+        
+        # Logits
+        logits_list = []
+        for valid_elem in validation_elements:
+            val_chunks = valid_elem[0]
+            logits = model.predict(val_chunks)
+            logits = tf.reshape(logits[0], [-1]).numpy()
+            logits = ','.join(map(str, logits))
+            logits_list.append(logits)
+        logits_list = str(logits_list)
         
         # Get the learning rate
         lr = scheduler((epoch+1)*STEPS_PER_EPOCH).numpy()
@@ -286,4 +304,4 @@ with tf.device('/GPU:0'):
         lru_values = lru_logger(model)
         
         # Write csv log
-        csv_logger({"epoch":epoch+1, "train_loss":train_loss, "val_loss":val_loss, "val_mean_accuracy":mean_accuracy_original, "val_median_accuracy":median_accuracy_original, "learning_rate":lr, "lru_values":lru_values, "alignments":alignments})
+        csv_logger({"epoch":epoch+1, "train_loss":train_loss, "val_loss":val_loss, "val_mean_accuracy":mean_accuracy_original, "val_median_accuracy":median_accuracy_original, "learning_rate":lr, "lru_values":lru_values, "alignments":alignments_list, "logits":logits_list})

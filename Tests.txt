@@ -1100,3 +1100,211 @@ Params 38.963.000
 Max mean accuracy 92.1
 Min loss 116.9
 Result: Training ended after 1266 epochs due to time limit. Loss did not converge yet but there is extreme overfitting. The Lambdas seem to have moved to their positions.
+
+Test 58:
+    tf.keras.mixed_precision.set_global_policy('mixed_float16')
+    x = tf.keras.layers.Conv1D(16, kernel_size=5, activation='swish', padding='same', use_bias=True)(inputs)
+    x = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.1, epsilon=1e-5)(x)
+    x = tf.keras.layers.Conv1D(16, kernel_size=5, activation='swish', padding='same', use_bias=True)(x)
+    x = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.1, epsilon=1e-5)(x)
+    x = tf.keras.layers.Conv1D(384, kernel_size=19, strides=6, activation='tanh', padding='same', use_bias=True)(x)
+    x = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.1, epsilon=1e-5)(x)
+    tf.keras.mixed_precision.set_global_policy('float32')
+    x = lru.LRU_Block(N=128, H=384, bidirectional=True, max_phase=2*pi/2, r_min=0.90, r_max=0.98, dropout=0)(x)
+    x = lru.LRU_Block(N=128, H=384, bidirectional=True, max_phase=2*pi/3, r_min=0.85, r_max=0.98, dropout=0)(x)
+    x = lru.LRU_Block(N=128, H=384, bidirectional=True, max_phase=2*pi/3, r_min=0.52, r_max=0.98, dropout=0)(x)
+    x = lru.LRU_Block(N=128, H=384, bidirectional=True, max_phase=2*pi/3, r_min=0.52, r_max=0.98, dropout=0)(x)
+    x = lru.LRU_Block(N=128, H=384, bidirectional=True, max_phase=2*pi/3, r_min=0.52, r_max=0.98, dropout=0)(x)
+    x = lru.LRU_Block(N=128, H=384, bidirectional=True, max_phase=2*pi/3, r_min=0.52, r_max=0.98, dropout=0)(x)
+    x = lru.LRU_Block(N=128, H=384, bidirectional=True, max_phase=2*pi/3, r_min=0.52, r_max=0.98, dropout=0)(x)
+    x = lru.LRU_Block(N=128, H=384, bidirectional=True, max_phase=2*pi/3, r_min=0.52, r_max=0.98, dropout=0)(x)
+    x = lru.LRU_Block(N=128, H=384, bidirectional=True, max_phase=2*pi/3, r_min=0.52, r_max=0.98, dropout=0)(x)
+    x = lru.LRU_Block(N=128, H=384, bidirectional=True, max_phase=2*pi/3, r_min=0.52, r_max=0.98, dropout=0)(x)
+    x = lru.LRU_Block(N=128, H=384, bidirectional=True, max_phase=2*pi/3, r_min=0.65, r_max=0.80, dropout=0)(x)
+    x = lru.LRU_Block(N=128, H=384, bidirectional=True, max_phase=2*pi/4, r_min=0.68, r_max=0.75, dropout=0)(x)
+    classes = tf.keras.layers.Dense(NUM_CLASSES, use_bias=True, dtype=tf.float32)(x)
+    classes = layers.ClipLayer(-5, 5)(classes)
+    scheduler = schedulers.WarmUpCosineDecayWithRestarts(
+        warmup_initial=8e-5, warmup_end=1e-4, warmup_steps=100000,
+        initial_learning_rate=1e-4, decay_steps=3200000, alpha=0.6, t_mul=0.06, m_mul=0.5)
+    optimizer = tf.keras.optimizers.AdamW(learning_rate=scheduler, weight_decay=0.01)
+Params 7.233.000
+Max mean accuracy 94.2
+Min loss 88.0
+Result: Training stopped after 84 full epochs due to time limit. Training seems to have nearly converged. There is slight overfitting. Lambdas seem to have mostly converged.
+
+Test 59:
+    x = tf.keras.layers.Conv1D(16, kernel_size=5, activation='swish', padding='same', use_bias=True)(inputs)
+    x = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.1, epsilon=1e-5)(x)
+    x = tf.keras.layers.Conv1D(16, kernel_size=5, activation='swish', padding='same', use_bias=True)(x)
+    x = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.1, epsilon=1e-5)(x)
+    x = tf.keras.layers.Conv1D(384, kernel_size=19, strides=6, activation='tanh', padding='same', use_bias=True)(x)
+    x = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.1, epsilon=1e-5)(x)
+    x = lru.LRU_Block(N=512, H=1536, bidirectional=True, max_phase=2*pi/2, r_min=0.90, r_max=0.98, dropout=0)(x)
+    x = lru.LRU_Block(N=512, H=1536, bidirectional=True, max_phase=2*pi/3, r_min=0.85, r_max=0.98, dropout=0)(x)
+    x = lru.LRU_Block(N=512, H=1536, bidirectional=True, max_phase=2*pi/3, r_min=0.52, r_max=0.98, dropout=0)(x)
+    x = lru.LRU_Block(N=512, H=1536, bidirectional=True, max_phase=2*pi/3, r_min=0.60, r_max=0.85, dropout=0)(x)
+    x = lru.LRU_Block(N=512, H=1536, bidirectional=True, max_phase=2*pi/4, r_min=0.68, r_max=0.75, dropout=0)(x)
+    classes = tf.keras.layers.Dense(NUM_CLASSES, use_bias=True, dtype=tf.float32)(x)
+    classes = layers.ClipLayer(-5, 5)(classes)
+    scheduler = schedulers.WarmUpCosineDecayWithRestarts(
+        warmup_initial=8e-5, warmup_end=1e-4, warmup_steps=100000,
+        initial_learning_rate=1e-4, decay_steps=3200000, alpha=0.6, t_mul=0.06, m_mul=0.5)
+    optimizer = tf.keras.optimizers.AdamW(learning_rate=scheduler, weight_decay=0.01)
+Params 45.006.000
+Max mean accuracy 94.4
+Min loss 71.9
+Result: Training stopped after 43 epochs due to time limit. Heavy overfitting and validation loss did not decrease anymore. Accuracy was still slightly increasing. Lambdas seem to have converged to the expected positions.
+
+Test 60:
+    tf.keras.mixed_precision.set_global_policy('mixed_float16')
+    x = tf.keras.layers.Conv1D(16, kernel_size=5, activation='swish', padding='same', use_bias=True)(inputs)
+    x = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.1, epsilon=1e-5)(x)
+    x = tf.keras.layers.Conv1D(16, kernel_size=5, activation='swish', padding='same', use_bias=True)(x)
+    x = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.1, epsilon=1e-5)(x)
+    x = tf.keras.layers.Conv1D(384, kernel_size=19, strides=6, activation='tanh', padding='same', use_bias=True)(x)
+    x = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.1, epsilon=1e-5)(x)
+    tf.keras.mixed_precision.set_global_policy('float32')
+    x = lru.LRU_Block(N=384, H=384, bidirectional=True, max_phase=2*pi/2, r_min=0.90, r_max=0.98, dropout=0)(x)
+    x = lru.LRU_Block(N=384, H=384, bidirectional=True, max_phase=2*pi/3, r_min=0.85, r_max=0.98, dropout=0)(x)
+    x = lru.LRU_Block(N=384, H=384, bidirectional=True, max_phase=2*pi/3, r_min=0.52, r_max=0.98, dropout=0)(x)
+    x = lru.LRU_Block(N=384, H=384, bidirectional=True, max_phase=2*pi/3, r_min=0.52, r_max=0.98, dropout=0)(x)
+    x = lru.LRU_Block(N=384, H=384, bidirectional=True, max_phase=2*pi/3, r_min=0.52, r_max=0.98, dropout=0)(x)
+    x = lru.LRU_Block(N=384, H=384, bidirectional=True, max_phase=2*pi/3, r_min=0.52, r_max=0.98, dropout=0)(x)
+    x = lru.LRU_Block(N=384, H=384, bidirectional=True, max_phase=2*pi/3, r_min=0.65, r_max=0.80, dropout=0)(x)
+    x = lru.LRU_Block(N=384, H=384, bidirectional=True, max_phase=2*pi/4, r_min=0.68, r_max=0.75, dropout=0)(x)
+    classes = tf.keras.layers.Dense(NUM_CLASSES, use_bias=True, dtype=tf.float32)(x)
+    classes = layers.ClipLayer(-5, 5)(classes)
+    scheduler = schedulers.WarmUpCosineDecayWithRestarts(
+        warmup_initial=8e-5, warmup_end=1e-4, warmup_steps=100000,
+        initial_learning_rate=1e-4, decay_steps=3200000, alpha=0.6, t_mul=0.06, m_mul=0.5)
+    optimizer = tf.keras.optimizers.AdamW(learning_rate=scheduler, weight_decay=0.01)
+Params 9.590.000
+Max mean accuracy 93.6
+Min loss 96.6
+Result: Training stopped after 71 full epochs due to time limit. Loss was still decreasing, but slowly. Slight overfitting visible. Lambdas in most layers converged, but maybe not all.
+
+Test 61:
+    tf.keras.mixed_precision.set_global_policy('mixed_float16')
+    x = tf.keras.layers.Conv1D(64, kernel_size=5, activation='swish', padding='same', use_bias=True)(inputs)
+    x = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.1, epsilon=1e-5)(x)
+    x = tf.keras.layers.Conv1D(64, kernel_size=5, activation='swish', padding='same', use_bias=True)(x)
+    x = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.1, epsilon=1e-5)(x)
+    x = tf.keras.layers.Conv1D(384, kernel_size=19, strides=6, activation='tanh', padding='same', use_bias=True)(x)
+    x = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.1, epsilon=1e-5)(x)
+    tf.keras.mixed_precision.set_global_policy('float32')
+    x = lru.LRU_Block(N=1024, H=144, bidirectional=True, max_phase=2*pi/10, r_min=0.05, r_max=0.95, use_skip_connection=True, dropout=0)(x)
+    x = lru.LRU_Block(N=1024, H=144, bidirectional=True, max_phase=2*pi/10, r_min=0.05, r_max=0.95, use_skip_connection=True, dropout=0)(x)
+    x = lru.LRU_Block(N=1024, H=144, bidirectional=True, max_phase=2*pi/10, r_min=0.05, r_max=0.95, use_skip_connection=True, dropout=0)(x)
+    x = lru.LRU_Block(N=1024, H=144, bidirectional=True, max_phase=2*pi/10, r_min=0.05, r_max=0.95, use_skip_connection=True, dropout=0)(x)
+    x = lru.LRU_Block(N=1024, H=144, bidirectional=True, max_phase=2*pi/10, r_min=0.05, r_max=0.95, use_skip_connection=True, dropout=0)(x)
+    x = lru.LRU_Block(N=1024, H=144, bidirectional=True, max_phase=2*pi/10, r_min=0.05, r_max=0.95, use_skip_connection=True, dropout=0)(x)
+    x = lru.LRU_Block(N=1024, H=144, bidirectional=True, max_phase=2*pi/10, r_min=0.05, r_max=0.95, use_skip_connection=False, dropout=0)(x)
+    x = lru.LRU_Block(N=1024, H=144, bidirectional=True, max_phase=2*pi/10, r_min=0.05, r_max=0.95, residual=False, use_skip_connection=False, dropout=0)(x)
+    classes = tf.keras.layers.Dense(NUM_CLASSES, use_bias=True, dtype=tf.float32)(x)
+    classes = layers.ClipLayer(-5, 5)(classes)
+    scheduler = schedulers.WarmUpCosineDecayWithRestarts(
+        warmup_initial=1e-6, warmup_end=2e-4, warmup_steps=31250,
+        initial_learning_rate=2e-4, decay_steps=2200000, alpha=0.05, t_mul=0.05, m_mul=0.05)
+    optimizer = tf.keras.optimizers.AdamW(learning_rate=scheduler, weight_decay=0.02)
+if self.use_nonlin:
+    self.denseW = tf.keras.layers.Dense(H, activation='linear')
+    self.denseV = tf.keras.layers.Dense(H, activation='tanh')
+Params 9.083.000
+Mean accuracy 89.0
+Min loss 168.3
+Result: Training stopped after 45 full epochs due to time limit. Loss had not converged yet. No overfitting yet. Lambdas moved but had by far not converged yet.
+
+Test 62:
+    tf.keras.mixed_precision.set_global_policy('mixed_float16')
+    x = tf.keras.layers.Conv1D(16, kernel_size=5, activation='swish', padding='same', use_bias=True)(inputs)
+    x = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.1, epsilon=1e-5)(x)
+    x = tf.keras.layers.Conv1D(16, kernel_size=5, activation='swish', padding='same', use_bias=True)(x)
+    x = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.1, epsilon=1e-5)(x)
+    x = tf.keras.layers.Conv1D(512, kernel_size=19, strides=6, activation='tanh', padding='same', use_bias=True)(x)
+    x = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.1, epsilon=1e-5)(x)
+    tf.keras.mixed_precision.set_global_policy('float32')
+    x = lru.LRU_Block(N=512, H=160, bidirectional=True, max_phase=2*pi/1, r_min=0.10, r_max=0.90, residual=True, use_skip_connection=True, dropout=0)(x)
+    x = lru.LRU_Block(N=512, H=160, bidirectional=True, max_phase=2*pi/1, r_min=0.10, r_max=0.90, residual=True, use_skip_connection=True, dropout=0)(x)
+    x = lru.LRU_Block(N=512, H=160, bidirectional=True, max_phase=2*pi/1, r_min=0.10, r_max=0.90, residual=True, use_skip_connection=True, dropout=0)(x)
+    x = lru.LRU_Block(N=512, H=160, bidirectional=True, max_phase=2*pi/1, r_min=0.10, r_max=0.90, residual=True, use_skip_connection=True, dropout=0)(x)
+    x = lru.LRU_Block(N=512, H=160, bidirectional=True, max_phase=2*pi/1, r_min=0.10, r_max=0.90, residual=True, use_skip_connection=True, dropout=0)(x)
+    x = lru.LRU_Block(N=512, H=160, bidirectional=True, max_phase=2*pi/1, r_min=0.10, r_max=0.90, residual=True, use_skip_connection=True, dropout=0)(x)
+    x = lru.LRU_Block(N=512, H=160, bidirectional=True, max_phase=2*pi/1, r_min=0.10, r_max=0.90, residual=True, use_skip_connection=True, dropout=0)(x)
+    x = lru.LRU_Block(N=512, H=160, bidirectional=True, max_phase=2*pi/1, r_min=0.10, r_max=0.90, residual=True, use_skip_connection=False, dropout=0)(x)
+    x = lru.LRU_Block(N=512, H=160, bidirectional=True, max_phase=2*pi/1, r_min=0.10, r_max=0.90, residual=False, use_skip_connection=False, dropout=0)(x)
+    x = lru.LRU_Block(N=512, H=160, bidirectional=True, max_phase=2*pi/1, r_min=0.10, r_max=0.90, residual=False, use_skip_connection=False, dropout=0)(x)
+    x = lru.LRU_Block(N=512, H=160, bidirectional=True, max_phase=2*pi/1, r_min=0.10, r_max=0.90, dropout=0)(x)
+    x = lru.LRU_Block(N=512, H=160, bidirectional=True, max_phase=2*pi/1, r_min=0.10, r_max=0.90, dropout=0)(x)
+    classes = tf.keras.layers.Dense(NUM_CLASSES, use_bias=True, dtype=tf.float32)(x)
+    classes = layers.ClipLayer(-5, 5)(classes)
+    scheduler = schedulers.WarmUpCosineDecayWithRestarts(
+        warmup_initial=8e-5, warmup_end=2e-4, warmup_steps=31250,
+        initial_learning_rate=2e-4, decay_steps=2500000, alpha=0.0025, t_mul=0.06, m_mul=0.025)
+    optimizer = tf.keras.optimizers.AdamW(learning_rate=scheduler, weight_decay=0.02)
+Params 7.667.000
+Mean accuracy 92.4
+Min loss 117.8
+Result: Training stopped after 51 full epochs due to time limit. Loss did not converge yet. Slight overfitting. Lambdas by far did not converge yet.
+
+Test 63:
+    tf.keras.mixed_precision.set_global_policy('mixed_float16')
+    x = tf.keras.layers.Conv1D(16, kernel_size=5, activation='swish', padding='same', use_bias=True)(inputs)
+    x = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.1, epsilon=1e-5)(x)
+    x = tf.keras.layers.Conv1D(16, kernel_size=5, activation='swish', padding='same', use_bias=True)(x)
+    x = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.1, epsilon=1e-5)(x)
+    x = tf.keras.layers.Conv1D(1024, kernel_size=19, strides=6, activation='tanh', padding='same', use_bias=True)(x)
+    x = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.1, epsilon=1e-5)(x)
+    tf.keras.mixed_precision.set_global_policy('float32')
+    x = lru.LRU_Block(N=512, H=192, bidirectional=True, max_phase=2*pi/1, r_min=0.02, r_max=0.98, dropout=0)(x)
+    x = lru.LRU_Block(N=512, H=192, bidirectional=True, max_phase=2*pi/1, r_min=0.02, r_max=0.98, dropout=0)(x)
+    x = lru.LRU_Block(N=512, H=192, bidirectional=True, max_phase=2*pi/1, r_min=0.02, r_max=0.98, dropout=0)(x)
+    x = lru.LRU_Block(N=512, H=192, bidirectional=True, max_phase=2*pi/1, r_min=0.02, r_max=0.98, dropout=0)(x)
+    x = lru.LRU_Block(N=512, H=192, bidirectional=True, max_phase=2*pi/1, r_min=0.02, r_max=0.98, dropout=0)(x)
+    x = lru.LRU_Block(N=512, H=192, bidirectional=True, max_phase=2*pi/1, r_min=0.02, r_max=0.98, dropout=0)(x)
+    classes = tf.keras.layers.Dense(NUM_CLASSES, use_bias=True, dtype=tf.float32)(x)
+    classes = layers.ClipLayer(-5, 5)(classes)
+    scheduler = schedulers.WarmUpCosineDecayWithRestarts(
+        warmup_initial=5e-5, warmup_end=2e-4, warmup_steps=31250,
+        initial_learning_rate=2e-4, decay_steps=31250, alpha=0.005, t_mul=1, m_mul=1)
+    optimizer = tf.keras.optimizers.AdamW(learning_rate=scheduler, weight_decay=0.005)
+def custom_sigmoid(x):
+    return(2*tf.sigmoid(x)-1)
+if self.use_nonlin:
+    self.denseW = tf.keras.layers.Dense(H, activation='linear')
+    self.denseV = tf.keras.layers.Dense(H, activation=custom_sigmoid)
+Params 6.026.000
+Mean accuracy 91.2
+Min loss 136.8
+Result: Training stopped after 86 full epochs due to time limit. Loss did not converge yet. No overfitting. Lambdas by far did not converge yet.
+
+Test 64:
+    tf.keras.mixed_precision.set_global_policy('mixed_float16')
+    x = tf.keras.layers.Conv1D(16, kernel_size=5, activation='swish', padding='same', use_bias=True)(inputs)
+    x = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.1, epsilon=1e-5)(x)
+    x = tf.keras.layers.Conv1D(16, kernel_size=5, activation='swish', padding='same', use_bias=True)(x)
+    x = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.1, epsilon=1e-5)(x)
+    x = tf.keras.layers.Conv1D(1024, kernel_size=19, strides=6, activation='tanh', padding='same', use_bias=True)(x)
+    x = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.1, epsilon=1e-5)(x)
+    tf.keras.mixed_precision.set_global_policy('float32')
+    x = lru.LRU_Block(N=512, H=192, bidirectional=True, max_phase=2*pi/1, r_min=0.02, r_max=0.98, dropout=0)(x)
+    x = lru.LRU_Block(N=512, H=192, bidirectional=True, max_phase=2*pi/1, r_min=0.02, r_max=0.98, dropout=0)(x)
+    x = lru.LRU_Block(N=512, H=192, bidirectional=True, max_phase=2*pi/1, r_min=0.02, r_max=0.98, dropout=0)(x)
+    x = lru.LRU_Block(N=512, H=192, bidirectional=True, max_phase=2*pi/1, r_min=0.02, r_max=0.98, dropout=0)(x)
+    x = lru.LRU_Block(N=512, H=192, bidirectional=True, max_phase=2*pi/1, r_min=0.02, r_max=0.98, dropout=0)(x)
+    x = lru.LRU_Block(N=512, H=192, bidirectional=True, max_phase=2*pi/1, r_min=0.02, r_max=0.98, dropout=0)(x)
+    classes = tf.keras.layers.Dense(NUM_CLASSES, use_bias=True, dtype=tf.float32)(x)
+    classes = layers.ClipLayer(-5, 5)(classes)
+    scheduler = schedulers.WarmUpCosineDecayWithRestarts(
+        warmup_initial=5e-5, warmup_end=2e-4, warmup_steps=31250,
+        initial_learning_rate=2e-4, decay_steps=31250, alpha=0.005, t_mul=1, m_mul=1)
+    optimizer = tf.keras.optimizers.AdamW(learning_rate=scheduler, weight_decay=0.005)
+def custom_sigmoid(x):
+    return (tf.sigmoid(x)-0.5)*2
+if self.use_nonlin:
+    self.denseW = tf.keras.layers.Dense(H, activation='swish')
+    self.denseV = tf.keras.layers.Dense(H, activation=custom_sigmoid)
+Params 6.026.000
+Mean accuracy 91.8
+Min loss 127.6
+Result: Training stopped after 85 full epochs due to time limit. Loss did not converge yet. No overfitting. Lambdas by far did not converge yet.

@@ -76,14 +76,13 @@ class Metrics:
         alignment_global = bc_util.alignment_global(prediction, reference)
         return {"pred_original":alignment_original.traceback.query, "ref_original":alignment_original.traceback.ref,
                 "pred_global":alignment_global.traceback.query, "ref_global":alignment_global.traceback.ref}
-        
     
     def decode_predictions(self, logits):
         # Get the length of each sequence in the batch
         input_lengths = np.ones(logits.shape[0]) * logits.shape[1]
         
         # Decode the predictions
-        decoded_sequences = tf.keras.ops.ctc_decode(logits, sequence_lengths=input_lengths, strategy="beam_search", beam_width=32)
+        decoded_sequences = tf.keras.ops.ctc_decode(logits, sequence_lengths=input_lengths, strategy="beam_search", beam_width=64)
         decoded_sequences = tf.cast(decoded_sequences[0][0], tf.int32)
         
         # Convert the tensor sequences to numpy arrays
@@ -118,9 +117,15 @@ class LRULogger:
         for layer in model.base_model.layers:
             if isinstance(layer, lru.LRU_Block):
                 nu_fw = layer.lru_fw.nu_log.numpy().tolist()
-                nu_rv = layer.lru_rv.nu_log.numpy().tolist()
+                try:
+                    nu_rv = layer.lru_rv.nu_log.numpy().tolist()
+                except:
+                    nu_rv = nu_fw
                 theta_fw = layer.lru_fw.theta_log.numpy().tolist()
-                theta_rv = layer.lru_rv.theta_log.numpy().tolist()
+                try:
+                    theta_rv = layer.lru_rv.theta_log.numpy().tolist()
+                except:
+                    theta_rv = theta_fw
                 layers_[c] = {"nu_fw":nu_fw, "nu_rv":nu_rv, "theta_fw":theta_fw, "theta_rv":theta_rv}
                 c += 1
         return layers_

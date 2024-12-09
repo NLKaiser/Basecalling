@@ -1,4 +1,5 @@
 import tensorflow as tf
+import math
 
 def _parse_function(proto):
     # Define your feature description dictionary
@@ -25,10 +26,11 @@ def _parse_function(proto):
     
     #reference = tf.sparse.to_dense(reference)
     
-    # Convert chunk and reference_length
+    # Convert chunk and reference_length as they are
     chunk = tf.cast(parsed_features['chunk'], tf.float32)
     # For some reason the target_lengths in the train dataset are offset by 7!
-    length = tf.minimum(parsed_features['reference_length'] + 7, 500)
+    #length = tf.minimum(parsed_features['reference_length'] + 7, 500)
+    length = parsed_features['reference_length']
     reference_length = tf.cast(length, tf.int32)
     
     return chunk, reference, reference_length
@@ -55,6 +57,32 @@ def load_tfrecords(tfrecord_file_path, batch_size=32, shuffle=False, repeat=Fals
     dataset = dataset.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
     
     return dataset
+
+# Naive reduction of training data set time steps
+def reduce_dataX(chunks, targets, target_lengths, factor):
+    targets = tf.sparse.to_dense(targets)
+    
+    chunks = chunks[:, :tf.cast(tf.math.ceil(chunks.shape[1] / factor), tf.int32)]
+    
+    target_lengths = tf.cast(tf.math.ceil(target_lengths / factor), dtype=tf.int32)
+    
+    new_length = tf.math.ceil(targets.shape[1] / factor)
+    targets_new = tf.zeros((targets.shape[0], new_length), dtype=tf.float32)
+    for i in range(len(target_lengths)):
+        num_values_to_keep = target_lengths[i].numpy()  # Get the number of values to keep as a Python int
+        values_to_keep = targets[i, :num_values_to_keep]  # Get the first num_values_to_keep from targets
+        # Prepare indices for updating
+        indices = tf.constant([[i, j] for j in range(num_values_to_keep)], dtype=tf.int32)
+        
+        # Use tf.tensor_scatter_nd_update to set values
+        targets_new = tf.tensor_scatter_nd_update(
+            targets_new,
+            indices,
+            tf.cast(values_to_keep, dtype=tf.float32)  # Ensure values_to_keep is float32
+        )
+    targets = tf.cast(targets_new, dtype=tf.int32)
+    targets = tf.sparse.from_dense(targets)
+    return chunks, targets, target_lengths
 
 # Naive reduction of training data set time steps
 def reduce_data(chunks, targets, target_lengths, factor):

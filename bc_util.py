@@ -4,6 +4,7 @@ import tensorflow as tf
 import re
 import parasail
 from collections import defaultdict
+from itertools import islice
 
 from Bio import pairwise2
 
@@ -155,3 +156,13 @@ def model_summary_to_string(model):
     model.summary(print_fn=lambda x: summary_lines.append(x))
     return "\n".join(summary_lines)
 
+def get_iter_elements(iter_, elems):
+    l = []
+    consumed = 0
+    for elem in elems:
+        elem = elem - consumed
+        tmp_iter = islice(iter_, elem, None)
+        val_chunks, val_targets, _ = next(tmp_iter)
+        l.append([val_chunks, val_targets])
+        consumed += elem + 1
+    return l
