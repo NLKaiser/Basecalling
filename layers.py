@@ -84,3 +84,106 @@ class TemporalContextLayer(tf.keras.layers.Layer):
         output = tf.squeeze(output, axis=2)
         
         return output  # Final shape: (batch_size, time_steps, 2n + 1)
+
+class TemporalContextStackingLayer(tf.keras.layers.Layer):
+    def __init__(self, n, **kwargs):
+        """
+        A custom layer that stacks feature states of previous n steps, 
+        current step, and next n steps.
+        
+        Args:
+        n (int): Number of steps to include before and after the current step.
+        """
+        super(TemporalContextStackingLayer, self).__init__(**kwargs)
+        self.n = n
+
+    def call(self, inputs):
+        """
+        Perform the stacking operation with appropriate padding.
+        
+        Args:
+        inputs (tf.Tensor): A tensor of shape (batch_size, sequence_length, num_features).
+        
+        Returns:
+        tf.Tensor: A tensor of shape (batch_size, sequence_length, (2*n + 1) * num_features).
+        """
+        # Padding on both sides of the sequence along the time dimension
+        padding = [[0, 0], [self.n, self.n], [0, 0]]  # No padding for batch or feature dims
+        padded_inputs = tf.pad(inputs, paddings=padding, mode='CONSTANT')
+
+        # Collect slices for stacking
+        slices = [
+            padded_inputs[:, i:(i + tf.shape(inputs)[1]), :]
+            for i in range(2 * self.n + 1)
+        ]
+        
+        # Stack slices along the last dimension
+        stacked = tf.concat(slices, axis=-1)
+        return stacked
+
+    def compute_output_shape(self, input_shape):
+        """
+        Compute the output shape of the layer.
+        
+        Args:
+        input_shape (tuple): Shape of the input tensor (batch_size, sequence_length, num_features).
+        
+        Returns:
+        tuple: Shape of the output tensor.
+        """
+        batch_size, sequence_length, num_features = input_shape
+        return batch_size, sequence_length, num_features * (2 * self.n + 1)
+
+class LinearCRFEncoder(tf.keras.layers.Layer):
+    def __init__(self, n_base, state_len, bias=True, scale=None, activation=None, blank_score=-2.0, expand_blanks=True, permute=None, **kwargs):
+        super(LinearCRFEncoder, self).__init__(**kwargs)
+        self.scale = scale
+        self.n_base = n_base
+        self.state_len = state_len
+        self.blank_score = blank_score
+        self.expand_blanks = expand_blanks
+        self.permute = permute
+
+        size = (n_base + 1) * n_base**state_len if blank_score is None else n_base**(state_len + 1)
+        self.linear = tf.keras.layers.Dense(size, use_bias=bias)
+        self.activation = tf.keras.layers.Activation(activation) if activation else None
+        
+        self.blank_score_layer = tf.keras.layers.Dense(1, use_bias=bias)
+    
+    def call(self, inputs):
+        # Permute dimensions if needed
+        if self.permute is not None:
+            inputs = tf.transpose(inputs, perm=self.permute)
+
+        # Linear transformation
+        scores = self.linear(inputs)
+
+        # Calculate blank score
+        dynamic_blank_scores = tf.squeeze(self.blank_score_layer(inputs), axis=-1)  # Compute dynamic blank scores
+
+        # Apply activation if provided
+        if self.activation is not None:
+            scores = self.activation(scores)
+
+        # Scale the scores if scale is provided
+        if self.scale is not None:
+            scores = scores * self.scale
+
+        # Handle blank score and expansion
+        if self.blank_score is not None and self.expand_blanks:
+            T, N, C = tf.shape(scores)[0], tf.shape(scores)[1], tf.shape(scores)[2]
+            scores = tf.reshape(scores, [T, N, C // self.n_base, self.n_base])
+
+            # Create a tensor for the blank scores
+            blank_score_tensor = tf.fill([T, N, C // self.n_base - 1, 1], self.blank_score)  # [T, N, C // self.n_base - 1, 1]
+            dynamic_blank_scores_expanded = tf.expand_dims(dynamic_blank_scores, axis=-1)  # [T, N, 1]
+            dynamic_blank_scores_expanded = tf.expand_dims(dynamic_blank_scores_expanded, axis=-1)  # [T, N, 1, 1]
+
+            # Combine dynamic and static blank scores
+            blank_score_tensor = tf.concat([dynamic_blank_scores_expanded, blank_score_tensor], axis=2)  # Adjust axis for proper combination
+
+            # Concatenate blank scores to the beginning of the scores along the feature dimension
+            scores = tf.concat([blank_score_tensor, scores], axis=-1)
+            scores = tf.reshape(scores, [T, N, -1])
+        
+        return scores

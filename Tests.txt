@@ -1308,3 +1308,117 @@ Params 6.026.000
 Mean accuracy 91.8
 Min loss 127.6
 Result: Training stopped after 85 full epochs due to time limit. Loss did not converge yet. No overfitting. Lambdas by far did not converge yet.
+
+Test 65:
+    tf.keras.mixed_precision.set_global_policy('mixed_float16')
+    x = tf.keras.layers.Conv1D(16, kernel_size=5, activation='swish', padding='same', use_bias=True)(inputs)
+    x = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.1, epsilon=1e-5)(x)
+    x = tf.keras.layers.Conv1D(16, kernel_size=5, activation='swish', padding='same', use_bias=True)(x)
+    x = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.1, epsilon=1e-5)(x)
+    x = tf.keras.layers.Conv1D(1024, kernel_size=19, strides=6, activation='tanh', padding='same', use_bias=True)(x)
+    x = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.1, epsilon=1e-5)(x)
+    tf.keras.mixed_precision.set_global_policy('float32')
+    x = lru.LRU_Block(N=96, H=448, bidirectional=True, init_bounds=[[0.92, 0.94, 2*pi/5, 2*pi/3.0, 1]], dropout=0.1)(x)
+    x = lru.LRU_Block(N=96, H=448, bidirectional=True, init_bounds=[[0.48, 0.64, 2*pi/8, 2*pi/2.5, 1]], dropout=0.1)(x)
+    x = lru.LRU_Block(N=96, H=448, bidirectional=True, init_bounds=[[0.48, 0.64, 2*pi/8, 2*pi/2.5, 1]], dropout=0.1)(x)
+    x = lru.LRU_Block(N=96, H=448, bidirectional=True, init_bounds=[[0.48, 0.64, 2*pi/8, 2*pi/2.5, 1]], dropout=0.1)(x)
+    x = lru.LRU_Block(N=96, H=448, bidirectional=True, init_bounds=[[0.48, 0.64, 2*pi/8, 2*pi/2.5, 1]], dropout=0.1)(x)
+    x = lru.LRU_Block(N=96, H=448, bidirectional=True, init_bounds=[[0.48, 0.64, 2*pi/8, 2*pi/2.5, 1]], dropout=0.1)(x)
+    x = lru.LRU_Block(N=96, H=448, bidirectional=True, init_bounds=[[0.70, 0.84, 2*pi/64, 2*pi/3, 1]], dropout=0.1)(x)
+    x = lru.LRU_Block(N=96, H=448, bidirectional=True, init_bounds=[[0.76, 0.86, 2*pi/128, 2*pi/4, 1]], dropout=0.1)(x)
+    classes = tf.keras.layers.Dense(NUM_CLASSES, use_bias=True, dtype=tf.float32)(x)
+    classes = layers.ClipLayer(-5, 5)(classes)
+    scheduler = schedulers.WarmUpCosineDecayWithRestarts(
+        warmup_initial=8e-5, warmup_end=2e-4, warmup_steps=31250,
+        initial_learning_rate=2e-4, decay_steps=70*31250, alpha=0.006, t_mul=0.4, m_mul=0.4)
+    optimizer = tf.keras.optimizers.AdamW(learning_rate=scheduler, weight_decay=0.002)
+def dsilu(x):
+    return tf.sigmoid(x) * (1 + x * (1 - tf.sigmoid(x)))
+self.denseW = tf.keras.layers.Dense(H, activation='linear')
+self.denseV = tf.keras.layers.Dense(H, activation=dsilu)
+Params 5.843.000
+Mean accuracy 93.2
+Min loss 98.1
+Result: Training manually stopped after 87 epochs, but nearly 3 days. The loss was still decreasing, however it fluctuatet a bit. Slight overfitting. Lambdas not really converged yet.
+
+Test 66:
+    tf.keras.mixed_precision.set_global_policy('mixed_float16')
+    x = tf.keras.layers.Conv1D(16, kernel_size=5, activation='swish', padding='same', use_bias=True)(inputs)
+    x = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.1, epsilon=1e-5)(x)
+    x = tf.keras.layers.Conv1D(16, kernel_size=5, activation='swish', padding='same', use_bias=True)(x)
+    x = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.1, epsilon=1e-5)(x)
+    x = tf.keras.layers.Conv1D(1024, kernel_size=19, strides=6, activation='tanh', padding='same', use_bias=True)(x)
+    x = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.1, epsilon=1e-5)(x)
+    tf.keras.mixed_precision.set_global_policy('float32')
+
+    x = lru.LRU_Block(N=96, H=1024, bidirectional=True, init_bounds=[[0.95, 0.97, 2*pi/6, 2*pi/2.8, 1]], dropout=0.1)(x)
+    x = lru.LRU_Block(N=96, H=1024, bidirectional=True, init_bounds=[[0.42, 0.68, 2*pi/6, 2*pi/2.5, 1]], dropout=0.1)(x)
+    x = lru.LRU_Block(N=96, H=1024, bidirectional=True, init_bounds=[[0.48, 0.64, 2*pi/8, 2*pi/2.5, 1]], dropout=0.1)(x)
+    x = lru.LRU_Block(N=96, H=1024, bidirectional=True, init_bounds=[[0.48, 0.64, 2*pi/8, 2*pi/2.5, 1]], dropout=0.1)(x)
+    x = lru.LRU_Block(N=96, H=1024, bidirectional=True, init_bounds=[[0.48, 0.64, 2*pi/8, 2*pi/2.5, 1]], dropout=0.1)(x)
+    x = lru.LRU_Block(N=96, H=1024, bidirectional=True, init_bounds=[[0.48, 0.64, 2*pi/8, 2*pi/2.5, 1]], dropout=0.1)(x)
+    x = lru.LRU_Block(N=96, H=1024, bidirectional=True, init_bounds=[[0.80, 0.84, 2*pi/64, 2*pi/3, 1]], dropout=0.1)(x)
+    x = lru.LRU_Block(N=96, H=1024, bidirectional=True, init_bounds=[[0.82, 0.86, 2*pi/128, 2*pi/4, 1]], dropout=0.1)(x)
+
+    x = layers.TemporalContextStackingLayer(2)(x)
+    # Output layer - logits for each time step
+    classes = tf.keras.layers.Dense(NUM_CLASSES, use_bias=True, dtype=tf.float32)(x)
+    classes = layers.ClipLayer(-5, 5)(classes)
+Train loss ~70
+Validation loss ~85
+Mean accuracy ~95
+
+Test 67:
+    tf.keras.mixed_precision.set_global_policy('mixed_float16')
+    x = tf.keras.layers.Conv1D(32, kernel_size=5, activation='swish', padding='same', use_bias=True)(inputs)
+    x = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.1, epsilon=1e-5)(x)
+    x = tf.keras.layers.Conv1D(32, kernel_size=5, activation='swish', padding='same', use_bias=True)(x)
+    x = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.1, epsilon=1e-5)(x)
+    x = tf.keras.layers.Conv1D(1024, kernel_size=19, strides=6, activation='tanh', padding='same', use_bias=True)(x)
+    x = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.1, epsilon=1e-5)(x)
+    tf.keras.mixed_precision.set_global_policy('float32')
+
+    x = lru.LRU_Block(N=512, H=1024, bidirectional=True, init_bounds=[[0.96, 0.98, 2*pi/6, 2*pi/2.8, 0.5], [0.92, 0.94, 2*pi/6, 2*pi/2.8, 0.5]], dropout=0.1)(x)
+    x = lru.LRU_Block(N=256, H=512, bidirectional=True, init_bounds=[[0.35, 0.75, 2*pi/12, 2*pi/2.2, 1]], dropout=0.1)(x)
+    x = lru.LRU_Block(N=256, H=512, bidirectional=True, init_bounds=[[0.35, 0.75, 2*pi/12, 2*pi/2.2, 1]], dropout=0.1)(x)
+    x = lru.LRU_Block(N=256, H=512, bidirectional=True, init_bounds=[[0.44, 0.60, 2*pi/14, 2*pi/2.1, 1]], dropout=0.1)(x)
+    x = lru.LRU_Block(N=256, H=512, bidirectional=True, init_bounds=[[0.46, 0.62, 2*pi/14, 2*pi/2.2, 1]], dropout=0.1)(x)
+    x = lru.LRU_Block(N=256, H=512, bidirectional=True, init_bounds=[[0.46, 0.62, 2*pi/14, 2*pi/2.3, 1]], dropout=0.1)(x)
+    x = lru.LRU_Block(N=256, H=512, bidirectional=True, init_bounds=[[0.72, 0.86, 2*pi/200, 2*pi/3.5, 1]], dropout=0.1)(x)
+    x = lru.LRU_Block(N=512, H=1024, bidirectional=True, init_bounds=[[0.78, 0.88, 2*pi/400, 2*pi/4, 1]], dropout=0.1)(x)
+
+    x = layers.TemporalContextStackingLayer(4)(x)
+    # Output layer - logits for each time step
+    classes = tf.keras.layers.Dense(NUM_CLASSES, use_bias=True, dtype=tf.float32)(x)
+    classes = layers.ClipLayer(-10, 10)(classes)
+Train loss ~68
+Validation loss ~79
+Mean accuracy ~95
+
+Test 68:
+New method used for targets
+    tf.keras.mixed_precision.set_global_policy('mixed_float16')
+    x = tf.keras.layers.Conv1D(32, kernel_size=5, activation='swish', padding='same', use_bias=True)(inputs)
+    x = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.1, epsilon=1e-5)(x)
+    x = tf.keras.layers.Conv1D(32, kernel_size=5, activation='swish', padding='same', use_bias=True)(x)
+    x = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.1, epsilon=1e-5)(x)
+    x = tf.keras.layers.Conv1D(512, kernel_size=19, strides=6, activation='tanh', padding='same', use_bias=True)(x)
+    x = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.1, epsilon=1e-5)(x)
+    tf.keras.mixed_precision.set_global_policy('float32')
+
+    x = lru.LRU_Block(N=128, H=512, bidirectional=True, init_bounds=[[0.01, 0.99, 0, 2*pi/10, 1]], dropout=0.1)(x)
+    x = lru.LRU_Block(N=128, H=512, bidirectional=True, init_bounds=[[0.01, 0.99, 0, 2*pi/10, 1]], dropout=0.1)(x)
+    x = lru.LRU_Block(N=128, H=512, bidirectional=True, init_bounds=[[0.01, 0.99, 0, 2*pi/10, 1]], dropout=0.1)(x)
+    x = lru.LRU_Block(N=128, H=512, bidirectional=True, init_bounds=[[0.01, 0.99, 0, 2*pi/10, 1]], dropout=0.1)(x)
+    x = lru.LRU_Block(N=128, H=512, bidirectional=True, init_bounds=[[0.01, 0.99, 0, 2*pi/10, 1]], dropout=0.1)(x)
+    x = lru.LRU_Block(N=128, H=512, bidirectional=True, init_bounds=[[0.01, 0.99, 0, 2*pi/10, 1]], dropout=0.1)(x)
+    x = lru.LRU_Block(N=128, H=512, bidirectional=True, init_bounds=[[0.01, 0.99, 0, 2*pi/10, 1]], dropout=0.1)(x)
+
+    #x = layers.TemporalContextStackingLayer(4)(x)
+    # Output layer - logits for each time step
+    classes = layers.LinearCRFEncoder(n_base=4, state_len=5, blank_score=-4.0)(x)
+    #classes = tf.keras.layers.Dense(NUM_CLASSES, use_bias=True, dtype=tf.float32)(x)
+    classes = layers.ClipLayer(-10, 10)(classes)
+Train loss ~215
+Validation loss ~240
+Mean accuracy ~94.5

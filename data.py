@@ -6,7 +6,7 @@ def _parse_function(proto):
     feature_description = {
         'chunk': tf.io.FixedLenFeature([5000], tf.float32),  # Assuming chunk has a fixed size of 5000
         'reference_indices': tf.io.VarLenFeature(tf.int64),  # Sparse tensor indices
-        'reference_values': tf.io.VarLenFeature(tf.float32),  # Sparse tensor values
+        'reference_values': tf.io.VarLenFeature(tf.int64),  # Sparse tensor values
         'reference_dense_shape': tf.io.FixedLenFeature([1], tf.int64),  # Expecting dense_shape to be [1] for 1D
         'reference_length': tf.io.FixedLenFeature([], tf.int64),  # Reference length
     }
@@ -15,13 +15,16 @@ def _parse_function(proto):
     parsed_features = tf.io.parse_single_example(proto, feature_description)
     
     # Extract indices and reshape them to [num_non_zero_elements, 1] for sparse tensor
-    reference_indices = tf.reshape(parsed_features['reference_indices'].values, [-1, 1])
+    indices = tf.reshape(parsed_features['reference_indices'].values, [-1, 1])
+    indices = tf.cast(indices, tf.int64)
+    values = tf.cast(parsed_features['reference_values'].values, tf.int32)
+    dense_shape = tf.cast(parsed_features['reference_dense_shape'], tf.int64)
     
     # Reconstruct the sparse tensor for reference
     reference = tf.SparseTensor(
-        indices=tf.cast(reference_indices, tf.int64),  # Reshaped indices for the sparse tensor
-        values=tf.cast(parsed_features['reference_values'].values, tf.int32),  # Sparse tensor values
-        dense_shape=tf.cast(parsed_features['reference_dense_shape'], tf.int64)  # Dense shape of the tensor
+        indices=indices,
+        values=values,
+        dense_shape=dense_shape
     )
     
     #reference = tf.sparse.to_dense(reference)
@@ -44,7 +47,7 @@ def load_tfrecords(tfrecord_file_path, batch_size=32, shuffle=False, repeat=Fals
     
     if shuffle:
         # Shuffle the dataset
-        dataset = dataset.shuffle(4096)
+        dataset = dataset.shuffle(2048)
     
     if repeat:
         # Repeat dataset indefinitely

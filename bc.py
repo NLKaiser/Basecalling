@@ -45,11 +45,12 @@ np.set_printoptions(threshold=514)
 directory = "./"
 # Hyperparameters
 BATCH_SIZE = 32
+VALID_BATCH_SIZE = 16
 EPOCHS = 512
 STEPS_PER_EPOCH = int(1000000/BATCH_SIZE)
 CHUNK_LENGTH = 5000
 TARGET_LENGTH = 500
-ALPHABET = ["N", "A", "C", "G","T"]
+ALPHABET = ["N", "A", "C", "G","T"] * 1024
 NUM_CLASSES = 5  # Including padding (0) and base classes (1-4)
 
 # pi for LRU layer
@@ -59,14 +60,14 @@ pi = 3.14
 def build_model():
     inputs = tf.keras.Input(shape=(None, 1))  # Input shape is (5000, 1) for sensor readings
     
-    tf.keras.mixed_precision.set_global_policy('mixed_float16')
+    #tf.keras.mixed_precision.set_global_policy('mixed_float16')
     x = tf.keras.layers.Conv1D(16, kernel_size=5, activation='swish', padding='same', use_bias=True)(inputs)
     x = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.1, epsilon=1e-5)(x)
     x = tf.keras.layers.Conv1D(16, kernel_size=5, activation='swish', padding='same', use_bias=True)(x)
     x = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.1, epsilon=1e-5)(x)
-    x = tf.keras.layers.Conv1D(1024, kernel_size=19, strides=6, activation='tanh', padding='same', use_bias=True)(x)
+    x = tf.keras.layers.Conv1D(512, kernel_size=19, strides=6, activation='tanh', padding='same', use_bias=True)(x)
     x = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.1, epsilon=1e-5)(x)
-    tf.keras.mixed_precision.set_global_policy('float32')
+    #tf.keras.mixed_precision.set_global_policy('float32')
     
     x = lru.LRU_Block(N=256, H=1024, bidirectional=True, max_phase=2*pi/3, r_min=0.9, r_max=0.98, dropout=0)(x)
     x = lru.LRU_Block(N=256, H=1024, bidirectional=True, max_phase=2*pi/3, r_min=0.68, r_max=0.75, dropout=0)(x)
@@ -76,7 +77,8 @@ def build_model():
     x = lru.LRU_Block(N=256, H=1024, bidirectional=True, max_phase=2*pi/4, r_min=0.68, r_max=0.75, dropout=0)(x)
     
     # Output layer - logits for each time step
-    classes = tf.keras.layers.Dense(NUM_CLASSES, use_bias=True, dtype=tf.float32)(x)
+    #classes = tf.keras.layers.Dense(NUM_CLASSES, use_bias=True, dtype=tf.float32)(x)
+    classes = layers.LinearCRFEncoder(n_base=4, state_len=5, blank_score=-2.0)(x)
     classes = layers.ClipLayer(-5, 5)(classes)
     
     model = tf.keras.Model(inputs, classes)
@@ -87,7 +89,9 @@ class CTCModel(tf.keras.Model):
     def __init__(self, model, batch_size):
         super(CTCModel, self).__init__()
         self.base_model = model
-        #self.scale = False
+        self.scale = False
+        self.loss_scale = False
+        self.loss_scale_factor = 1024
     
     @tf.function
     def call(self, inputs):
@@ -105,18 +109,24 @@ class CTCModel(tf.keras.Model):
             # Compute CTC loss
             loss = tf.reduce_mean(tf.nn.ctc_loss(labels=targets, logits=logits, label_length=target_lengths, logit_length=input_lengths, logits_time_major=True, blank_index=0))
         
+        
+        if self.loss_scale:
+            loss = loss * self.loss_scale_factor
+        
         # Compute gradients
         gradients = tape.gradient(loss, self.trainable_variables)
         
+        if self.loss_scale:
+            gradients = [grad / self.loss_scale_factor for grad in gradients]
+        
         # Optional scaling
-        #if self.scale == True:
-        #    #to_scale = ["nu_log", "theta_log", "B_re", "B_im", "C_re", "C_im"]
-        #    to_scale = ["nu_log", "theta_log"]
-        #    scaled_gradients = [
-        #        grad * 10 if var.name in to_scale else grad
-        #        for grad, var in zip(gradients, self.trainable_variables)
-        #    ]
-        #    gradients = scaled_gradients
+        if self.scale:
+            #to_scale = ["nu_log", "theta_log", "B_re", "B_im", "C_re", "C_im"]
+            to_scale = ["nu_log", "theta_log"]
+            gradients = [
+                grad * 10 if var.name in to_scale else grad
+                for grad, var in zip(gradients, self.trainable_variables)
+            ]
         
         # Apply gradients
         self.optimizer.apply_gradients(zip(gradients, self.trainable_variables))
@@ -143,20 +153,20 @@ class CTCModel(tf.keras.Model):
 with tf.device('/GPU:0'):
     
     scheduler = schedulers.WarmUpCosineDecayWithRestarts(
-        warmup_initial=8e-5, warmup_end=1e-4, warmup_steps=31250,
+        warmup_initial=8e-5, warmup_end=2e-4, warmup_steps=31250,
         initial_learning_rate=2e-4, decay_steps=70*31250, alpha=0.6, t_mul=0.06, m_mul=0.5)
     optimizer = tf.keras.optimizers.AdamW(learning_rate=scheduler, weight_decay=0.002)
     
     # Initialise the model and optimizer
     m = build_model()
     model = CTCModel(m, BATCH_SIZE)
-    model.compile(optimizer=optimizer)
     model.build((None,1))
+    model.compile(optimizer=optimizer)
     
     # Read in the dataset
     train_dataset = data.load_tfrecords(directory + "train_data.tfrecord", batch_size=BATCH_SIZE, shuffle=True, repeat=True)
     train_iter = iter(train_dataset)
-    valid_dataset = data.load_tfrecords(directory + "valid_data.tfrecord", batch_size=BATCH_SIZE, shuffle=False, repeat=False)
+    valid_dataset = data.load_tfrecords(directory + "valid_data.tfrecord", batch_size=VALID_BATCH_SIZE, shuffle=False, repeat=False)
     valid_dataset_length = sum(1 for _ in iter(valid_dataset))
     
     model_summary = bc_util.model_summary_to_string(model)

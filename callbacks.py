@@ -74,15 +74,19 @@ class Metrics:
         prediction = bc_util.decode_ref(self.remove_trailing(prediction, -1), self.alphabet)
         alignment_original = bc_util.alignment_local(prediction, reference)
         alignment_global = bc_util.alignment_global(prediction, reference)
-        return {"pred_original":alignment_original.traceback.query, "ref_original":alignment_original.traceback.ref,
-                "pred_global":alignment_global.traceback.query, "ref_global":alignment_global.traceback.ref}
+        try:
+            return {"pred_original":alignment_original.traceback.query, "ref_original":alignment_original.traceback.ref,
+                    "pred_global":alignment_global.traceback.query, "ref_global":alignment_global.traceback.ref}
+        except:
+            return {"pred_original":"-", "ref_original":"-",
+                    "pred_global":"-", "ref_global":"-"}
     
     def decode_predictions(self, logits):
         # Get the length of each sequence in the batch
         input_lengths = np.ones(logits.shape[0]) * logits.shape[1]
         
         # Decode the predictions
-        decoded_sequences = tf.keras.ops.ctc_decode(logits, sequence_lengths=input_lengths, strategy="beam_search", beam_width=64)
+        decoded_sequences = tf.keras.ops.ctc_decode(logits, sequence_lengths=input_lengths, strategy="greedy", beam_width=16)
         decoded_sequences = tf.cast(decoded_sequences[0][0], tf.int32)
         
         # Convert the tensor sequences to numpy arrays
