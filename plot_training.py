@@ -222,8 +222,30 @@ def plot_beam_search_epoch(epoch):
         arr = np.array(arr, dtype=float)
         arr = arr.reshape(-1, 5)
         arr = softmax(arr, axis=-1)
-        result = beam_search_decoder(arr, 64)[0][0]
+        result = beam_search_decoder(arr, 32)[0][0]
         plot_beam_search(count, result)
+        count += 1
+
+def print_beam_width_comparison_epoch(epoch):
+    with open("training.csv") as f:
+        next(f)
+        for i, line in enumerate(f):
+            if i == epoch:
+                l = line.split(";")
+                logits = ast.literal_eval(l[8])
+                targets = ast.literal_eval(l[9])
+    count = 1
+    for logit, target in zip(logits, targets):
+        logit = logit.split(",")
+        logit = np.array(logit, dtype=float)
+        logit = logit.reshape(1, -1, 5120)
+        print("Accuracies for " + str(count) + ":")
+        accuracy = bc_util.decode_and_accuracy(logit, target, "greedy", 0)
+        print("Greedy:", accuracy)
+        accuracy = bc_util.decode_and_accuracy(logit, target, "beam_search", 12)
+        print("Beam width 12:", accuracy)
+        accuracy = bc_util.decode_and_accuracy(logit, target, "beam_search", 32)
+        print("Beam width 32:", accuracy)
         count += 1
 
 plot_loss(train_loss, val_loss)
@@ -232,3 +254,4 @@ plot_lru_epoch(0)
 plot_lru_epoch(epoch[-1])
 plot_alignments_epoch(epoch[-1])
 plot_beam_search_epoch(epoch[-1])
+print_beam_width_comparison_epoch(epoch[-1])

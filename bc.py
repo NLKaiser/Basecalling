@@ -108,16 +108,16 @@ class CTCModel(tf.keras.Model):
             
             # Compute CTC loss
             loss = tf.reduce_mean(tf.nn.ctc_loss(labels=targets, logits=logits, label_length=target_lengths, logit_length=input_lengths, logits_time_major=True, blank_index=0))
-        
-        
-        if self.loss_scale:
-            loss = loss * self.loss_scale_factor
+            
+            if self.loss_scale:
+                loss = loss * self.loss_scale_factor
         
         # Compute gradients
         gradients = tape.gradient(loss, self.trainable_variables)
         
         if self.loss_scale:
-            gradients = [grad / self.loss_scale_factor for grad in gradients]
+            gradients = [grad / self.loss_scale_factor if grad is not None else None for grad in gradients]
+            loss = loss / self.loss_scale_factor
         
         # Optional scaling
         if self.scale:
@@ -177,8 +177,8 @@ with tf.device('/GPU:0'):
     model_reset = callbacks.ModelReset(model)
     lru_logger = callbacks.LRULogger()
     lru_values = lru_logger(model)
-    csv_logger = callbacks.CSVLogger("training.csv", ["epoch", "train_loss", "val_loss", "val_mean_accuracy", "val_median_accuracy", "learning_rate", "lru_values", "alignments", "logits"])
-    csv_logger({"epoch":0, "train_loss":0, "val_loss":0, "val_mean_accuracy":0, "val_median_accuracy":0, "learning_rate":0, "lru_values":lru_values, "alignments":"", "logits":""})
+    csv_logger = callbacks.CSVLogger("training.csv", ["epoch", "train_loss", "val_loss", "val_mean_accuracy", "val_median_accuracy", "learning_rate", "lru_values", "alignments", "logits", "valid_targets"])
+    csv_logger({"epoch":0, "train_loss":0, "val_loss":0, "val_mean_accuracy":0, "val_median_accuracy":0, "learning_rate":0, "lru_values":lru_values, "alignments":"", "logits":"", "valid_targets":""})
     
     train_loss_results = []
     val_loss_results = []
@@ -304,6 +304,15 @@ with tf.device('/GPU:0'):
             logits_list.append(logits)
         logits_list = str(logits_list)
         
+        target_list = []
+        for valid_elem in validation_elements:
+            val_targets = valid_elem[1]
+            val_targets = tf.sparse.to_dense(val_targets, default_value=0)
+            val_targets = val_targets.numpy()[0]
+            val_targets = bc_util.decode_ref(bc_util.remove_trailing(val_targets, 0), ALPHABET)
+            target_list.append(val_targets)
+        target_list = str(target_list)
+        
         # Get the learning rate
         lr = scheduler((epoch+1)*STEPS_PER_EPOCH).numpy()
         # Only needed for custom scheduler
@@ -314,4 +323,4 @@ with tf.device('/GPU:0'):
         lru_values = lru_logger(model)
         
         # Write csv log
-        csv_logger({"epoch":epoch+1, "train_loss":train_loss, "val_loss":val_loss, "val_mean_accuracy":mean_accuracy_original, "val_median_accuracy":median_accuracy_original, "learning_rate":lr, "lru_values":lru_values, "alignments":alignments_list, "logits":logits_list})
+        csv_logger({"epoch":epoch+1, "train_loss":train_loss, "val_loss":val_loss, "val_mean_accuracy":mean_accuracy_original, "val_median_accuracy":median_accuracy_original, "learning_rate":lr, "lru_values":lru_values, "alignments":alignments_list, "logits":logits_list, "valid_targets":target_list})

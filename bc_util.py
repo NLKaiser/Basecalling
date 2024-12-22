@@ -166,3 +166,22 @@ def get_iter_elements(iter_, elems):
         l.append([val_chunks, val_targets])
         consumed += elem + 1
     return l
+
+def remove_trailing(arr, num):
+    indices = np.where(arr == num)[0]
+    if indices.size == 0:
+        # No num found, return the array as is
+        return arr
+    else:
+        # Slice up to the first num
+        return arr[:indices[0]]
+
+def decode_and_accuracy(logits, target, strategy, beam_width):
+    decoded = tf.keras.ops.ctc_decode(logits, sequence_lengths=[logits.shape[1]], strategy=strategy, beam_width=beam_width)
+    decoded = tf.cast(decoded[0][0], tf.int32)
+    decoded = decoded.numpy()
+    decoded = decode_ref(remove_trailing(decoded, -1), ["N", "A", "C", "G", "T"] * 1024)
+    try:
+        return accuracy(target, decoded, min_coverage=0.5)
+    except:
+        return 0
