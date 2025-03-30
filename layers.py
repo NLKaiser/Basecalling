@@ -147,8 +147,6 @@ class LinearCRFEncoder(tf.keras.layers.Layer):
         size = (n_base + 1) * n_base**state_len if blank_score is None else n_base**(state_len + 1)
         self.linear = tf.keras.layers.Dense(size, use_bias=bias)
         self.activation = tf.keras.layers.Activation(activation) if activation else None
-        
-        self.blank_score_layer = tf.keras.layers.Dense(1, use_bias=bias)
     
     def call(self, inputs):
         # Permute dimensions if needed
@@ -157,9 +155,6 @@ class LinearCRFEncoder(tf.keras.layers.Layer):
 
         # Linear transformation
         scores = self.linear(inputs)
-
-        # Calculate blank score
-        dynamic_blank_scores = tf.squeeze(self.blank_score_layer(inputs), axis=-1)  # Compute dynamic blank scores
 
         # Apply activation if provided
         if self.activation is not None:
@@ -175,13 +170,8 @@ class LinearCRFEncoder(tf.keras.layers.Layer):
             scores = tf.reshape(scores, [T, N, C // self.n_base, self.n_base])
 
             # Create a tensor for the blank scores
-            blank_score_tensor = tf.fill([T, N, C // self.n_base - 1, 1], self.blank_score)  # [T, N, C // self.n_base - 1, 1]
-            dynamic_blank_scores_expanded = tf.expand_dims(dynamic_blank_scores, axis=-1)  # [T, N, 1]
-            dynamic_blank_scores_expanded = tf.expand_dims(dynamic_blank_scores_expanded, axis=-1)  # [T, N, 1, 1]
-
-            # Combine dynamic and static blank scores
-            blank_score_tensor = tf.concat([dynamic_blank_scores_expanded, blank_score_tensor], axis=2)  # Adjust axis for proper combination
-
+            blank_score_tensor = tf.fill([T, N, C // self.n_base, 1], self.blank_score)  # [T, N, C // self.n_base - 1, 1]
+            
             # Concatenate blank scores to the beginning of the scores along the feature dimension
             scores = tf.concat([blank_score_tensor, scores], axis=-1)
             scores = tf.reshape(scores, [T, N, -1])

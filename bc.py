@@ -89,6 +89,7 @@ class CTCModel(tf.keras.Model):
     def __init__(self, model, batch_size):
         super(CTCModel, self).__init__()
         self.base_model = model
+        self.HMM = CTC_HMM.HMM(BATCH_SIZE, 500, 834, 0, crf=True, epsilon=-tf.float32.max)
         self.scale = False
         self.loss_scale = False
         self.loss_scale_factor = 1024
@@ -103,11 +104,14 @@ class CTCModel(tf.keras.Model):
             logits = self(chunks, training=True)
             # Time dimension of the models output * batch size
             input_lengths = tf.shape(logits)[1] * tf.ones([tf.shape(chunks)[0]], dtype=tf.int32)
+            
+            loss = tf.reduce_mean(self.HMM(targets, logits, target_lengths, input_lengths))
+            
             # Logits time major
-            logits = tf.transpose(logits, perm=[1, 0, 2])
+            #logits = tf.transpose(logits, perm=[1, 0, 2])
             
             # Compute CTC loss
-            loss = tf.reduce_mean(tf.nn.ctc_loss(labels=targets, logits=logits, label_length=target_lengths, logit_length=input_lengths, logits_time_major=True, blank_index=0))
+            #loss = tf.reduce_mean(tf.nn.ctc_loss(labels=targets, logits=logits, label_length=target_lengths, logit_length=input_lengths, logits_time_major=True, blank_index=0))
             
             if self.loss_scale:
                 loss = loss * self.loss_scale_factor
@@ -154,7 +158,7 @@ with tf.device('/GPU:0'):
     
     scheduler = schedulers.WarmUpCosineDecayWithRestarts(
         warmup_initial=8e-5, warmup_end=2e-4, warmup_steps=31250,
-        initial_learning_rate=2e-4, decay_steps=70*31250, alpha=0.6, t_mul=0.06, m_mul=0.5)
+        initial_learning_rate=2e-4, decay_steps=10*31250, alpha=0.6, t_mul=0.06, m_mul=0.5)
     optimizer = tf.keras.optimizers.AdamW(learning_rate=scheduler, weight_decay=0.002)
     
     # Initialise the model and optimizer
