@@ -10,8 +10,8 @@ import csv
 
 class Metrics:
     
-    def __init__(self, alphabet, model_summary):
-        self.alphabet = alphabet
+    def __init__(self, model_summary):
+        self.alphabet = {1: "A", 2: "C", 3: "G", 4: "T"}
         self.model_summary = model_summary
         
         self.accuracy_original = [0]
@@ -20,26 +20,21 @@ class Metrics:
         
         self.max_mean_accuracy = 0
     
-    def batch_accuracy(self, prediction, targets, original=True, global_=True, pairwise=True):
-        val_targets = tf.sparse.to_dense(targets, default_value=0)
-        val_targets = val_targets.numpy()
-        
-        # Decode the predictions
-        decoded_sequences = self.decode_predictions(prediction)
+    def batch_accuracy(self, decoded, targets, original=True, global_=True, pairwise=True):
+        val_targets = targets.numpy()
         
         # val_targets are numbers from 1 to 4, padded with 0
-        refs = [bc_util.decode_ref(self.remove_trailing(target, 0), self.alphabet) for target in val_targets]
-        # decoded_sequences are numbers from 1 to 4, padded with -1
-        seqs = [bc_util.decode_ref(self.remove_trailing(target, -1), self.alphabet) for target in decoded_sequences]
+        refs = ["".join(self.alphabet[i] for i in target if i in self.alphabet)
+        for target in val_targets]
         
         if original:
-            accs_original = [bc_util.accuracy(ref, seq, min_coverage=0.5) if len(seq) else 0. for ref, seq in zip(refs, seqs)]
+            accs_original = [bc_util.accuracy(ref, seq, min_coverage=0.5) if len(seq) else 0. for ref, seq in zip(refs, decoded)]
             self.accuracy_original = accs_original
         if global_:
-            accs_global = [bc_util.accuracy_global(ref, seq, min_coverage=0.5) if len(seq) else 0. for ref, seq in zip(refs, seqs)]
+            accs_global = [bc_util.accuracy_global(ref, seq, min_coverage=0.5) if len(seq) else 0. for ref, seq in zip(refs, decoded)]
             self.accuracy_global = accs_global
         if pairwise:
-            accs_pairwise = [bc_util.accuracy_pairwise(ref, seq, min_coverage=0.5) if len(seq) else 0. for ref, seq in zip(refs, seqs)]
+            accs_pairwise = [bc_util.accuracy_pairwise(ref, seq, min_coverage=0.5) if len(seq) else 0. for ref, seq in zip(refs, decoded)]
             self.accuracy_pairwise = accs_pairwise
     
     def print_statistics(self, type_, stats, summary=True, original=True, global_=True, pairwise=True):
@@ -66,12 +61,10 @@ class Metrics:
     
     # Return one prediction and reference globally aligned and as it is done in bonito
     def alignment_comparison(self, prediction, reference):
-        reference = tf.sparse.to_dense(reference, default_value=0)
+        #reference = tf.sparse.to_dense(reference, default_value=0)
         reference = reference.numpy()[0]
-        reference = bc_util.decode_ref(self.remove_trailing(reference, 0), self.alphabet)
-        prediction = prediction[:1, :, :]
-        prediction = self.decode_predictions(prediction)[0]
-        prediction = bc_util.decode_ref(self.remove_trailing(prediction, -1), self.alphabet)
+        reference = "".join(self.alphabet[i] for i in reference if i in self.alphabet)
+        prediction = prediction[0]
         alignment_original = bc_util.alignment_local(prediction, reference)
         alignment_global = bc_util.alignment_global(prediction, reference)
         try:
@@ -80,27 +73,6 @@ class Metrics:
         except:
             return {"pred_original":"-", "ref_original":"-",
                     "pred_global":"-", "ref_global":"-"}
-    
-    def decode_predictions(self, logits):
-        # Get the length of each sequence in the batch
-        input_lengths = np.ones(logits.shape[0]) * logits.shape[1]
-        
-        # Decode the predictions
-        decoded_sequences = tf.keras.ops.ctc_decode(logits, sequence_lengths=input_lengths, strategy="greedy", beam_width=16)
-        decoded_sequences = tf.cast(decoded_sequences[0][0], tf.int32)
-        
-        # Convert the tensor sequences to numpy arrays
-        decoded_arrays = [seq.numpy() for seq in decoded_sequences]
-        return decoded_arrays
-    
-    def remove_trailing(self, arr, num):
-        indices = np.where(arr == num)[0]
-        if indices.size == 0:
-            # No num found, return the array as is
-            return arr
-        else:
-            # Slice up to the first num
-            return arr[:indices[0]]
 
 class ModelReset:
     def __init__(self, model, reset_counter=0):
@@ -118,7 +90,7 @@ class LRULogger:
     def __call__(self, model):
         layers_ = {}
         c = 0
-        for layer in model.base_model.layers:
+        for layer in model.model_architecture.layers:
             if isinstance(layer, lru.LRU_Block):
                 nu_fw = layer.lru_fw.nu_log.numpy().tolist()
                 try:
@@ -138,12 +110,12 @@ class CSVLogger:
     def __init__(self, filename, fieldnames):
         self.filename = filename
         self.fieldnames = fieldnames
-
+        
         # Open the file in write mode to initialize with the header
         with open(self.filename, mode='w', newline='') as file:
             writer = csv.DictWriter(file, fieldnames=self.fieldnames, delimiter=';')
             writer.writeheader()  # Write the header
-
+    
     def __call__(self, data):
         # Open the file in append mode to write a new row
         with open(self.filename, mode='a', newline='') as file:

@@ -6,6 +6,11 @@ import callbacks
 
 import LRU_tf as lru
 
+import CTC
+import CTC_HMM
+import CTC_2_HMM
+import CRF_HMM
+
 import time
 from tqdm import tqdm
 
@@ -50,14 +55,18 @@ EPOCHS = 512
 STEPS_PER_EPOCH = int(1000000/BATCH_SIZE)
 CHUNK_LENGTH = 5000
 TARGET_LENGTH = 500
-ALPHABET = ["N", "A", "C", "G","T"] * 1024
-NUM_CLASSES = 5  # Including padding (0) and base classes (1-4)
+NUM_CLASSES = 21  # Including padding (0) and base classes (1-4)
+
+MODEL_TYPE = CTC_2_HMM.HMM(BATCH_SIZE, 500, 834, epsilon=-tf.float32.max)
+MODEL_VALID_TYPE = CTC_2_HMM.HMM(VALID_BATCH_SIZE, 500, 834, epsilon=-tf.float32.max)
+#MODEL_TYPE = CTC.CTC()
+#MODEL_VALID_TYPE = CTC.CTC()
 
 # pi for LRU layer
 pi = 3.14
 
 # The model structure
-def build_model():
+def build_model_architecture():
     inputs = tf.keras.Input(shape=(None, 1))  # Input shape is (5000, 1) for sensor readings
     
     #tf.keras.mixed_precision.set_global_policy('mixed_float16')
@@ -77,26 +86,27 @@ def build_model():
     x = lru.LRU_Block(N=256, H=1024, bidirectional=True, max_phase=2*pi/4, r_min=0.68, r_max=0.75, dropout=0)(x)
     
     # Output layer - logits for each time step
-    #classes = tf.keras.layers.Dense(NUM_CLASSES, use_bias=True, dtype=tf.float32)(x)
-    classes = layers.LinearCRFEncoder(n_base=4, state_len=5, blank_score=-2.0)(x)
+    classes = tf.keras.layers.Dense(NUM_CLASSES, use_bias=True, dtype=tf.float32)(x)
+    #classes = layers.LinearCRFEncoder(n_base=4, state_len=5, blank_score=-2.0)(x)
     classes = layers.ClipLayer(-5, 5)(classes)
     
     model = tf.keras.Model(inputs, classes)
     return model
 
 # Compile and train the model
-class CTCModel(tf.keras.Model):
-    def __init__(self, model, batch_size):
-        super(CTCModel, self).__init__()
-        self.base_model = model
-        self.HMM = CTC_HMM.HMM(BATCH_SIZE, 500, 834, 0, crf=True, epsilon=-tf.float32.max)
+class Model(tf.keras.Model):
+    def __init__(self, architecture_, type_, valid_type_):
+        super(Model, self).__init__()
+        self.model_architecture = architecture_
+        self.model_type = type_
+        self.model_valid_type = valid_type_
         self.scale = False
         self.loss_scale = False
         self.loss_scale_factor = 1024
     
     @tf.function
     def call(self, inputs):
-        return self.base_model(inputs)
+        return self.model_architecture(inputs)
     
     @tf.function
     def train_step(self, chunks, targets, target_lengths):
@@ -105,13 +115,7 @@ class CTCModel(tf.keras.Model):
             # Time dimension of the models output * batch size
             input_lengths = tf.shape(logits)[1] * tf.ones([tf.shape(chunks)[0]], dtype=tf.int32)
             
-            loss = tf.reduce_mean(self.HMM(targets, logits, target_lengths, input_lengths))
-            
-            # Logits time major
-            #logits = tf.transpose(logits, perm=[1, 0, 2])
-            
-            # Compute CTC loss
-            #loss = tf.reduce_mean(tf.nn.ctc_loss(labels=targets, logits=logits, label_length=target_lengths, logit_length=input_lengths, logits_time_major=True, blank_index=0))
+            loss = tf.reduce_mean(self.model_type(targets, logits, target_lengths, input_lengths))
             
             if self.loss_scale:
                 loss = loss * self.loss_scale_factor
@@ -141,10 +145,9 @@ class CTCModel(tf.keras.Model):
     def test_step(self, chunks, targets, target_lengths):
         logits = self(chunks, training=False)
         input_lengths = tf.shape(logits)[1] * tf.ones([tf.shape(chunks)[0]], dtype=tf.int32)
-        logits = tf.transpose(logits, perm=[1, 0, 2])
         
-        # Compute CTC loss
-        loss = tf.reduce_mean(tf.nn.ctc_loss(labels=targets, logits=logits, label_length=target_lengths, logit_length=input_lengths, logits_time_major=True, blank_index=0))
+        # Compute the loss
+        loss = tf.reduce_mean(self.model_valid_type(targets, logits, target_lengths, input_lengths))
         
         return {"validation_loss": loss}
     
@@ -152,7 +155,10 @@ class CTCModel(tf.keras.Model):
     def predict(self, chunks):
         logits = self(chunks, training=False)
         return logits
-
+    
+    def decode(self, chunks):
+        logits = self(chunks, training=False)
+        return self.model_type.decode(logits)
 
 with tf.device('/GPU:0'):
     
@@ -162,8 +168,8 @@ with tf.device('/GPU:0'):
     optimizer = tf.keras.optimizers.AdamW(learning_rate=scheduler, weight_decay=0.002)
     
     # Initialise the model and optimizer
-    m = build_model()
-    model = CTCModel(m, BATCH_SIZE)
+    architecture = build_model_architecture()
+    model = Model(architecture, MODEL_TYPE, MODEL_VALID_TYPE)
     model.build((None,1))
     model.compile(optimizer=optimizer)
     
@@ -177,7 +183,7 @@ with tf.device('/GPU:0'):
     print(model_summary)
     
     # Initialise callbacks
-    metrics = callbacks.Metrics(ALPHABET, model_summary)
+    metrics = callbacks.Metrics(model_summary)
     model_reset = callbacks.ModelReset(model)
     lru_logger = callbacks.LRULogger()
     lru_values = lru_logger(model)
@@ -199,9 +205,9 @@ with tf.device('/GPU:0'):
         except:
             val_loss = 1000
         
-        prediction = model.predict(val_chunks)
+        decoded = model.decode(val_chunks)
         # Calculate validation accuracy
-        metrics.batch_accuracy(prediction, val_targets, original=original, global_=global_, pairwise=pairwise)
+        metrics.batch_accuracy(decoded, val_targets, original=original, global_=global_, pairwise=pairwise)
         
         accuracy_original = metrics.accuracy_original
         accuracy_global = metrics.accuracy_global
@@ -295,7 +301,7 @@ with tf.device('/GPU:0'):
         for valid_elem in validation_elements:
             val_chunks = valid_elem[0]
             val_targets = valid_elem[1]
-            alignments_list.append(metrics.alignment_comparison(model.predict(val_chunks), val_targets))
+            alignments_list.append(metrics.alignment_comparison(model.decode(val_chunks), val_targets))
         alignments_list = str(alignments_list)
         
         # Logits
@@ -311,9 +317,8 @@ with tf.device('/GPU:0'):
         target_list = []
         for valid_elem in validation_elements:
             val_targets = valid_elem[1]
-            val_targets = tf.sparse.to_dense(val_targets, default_value=0)
             val_targets = val_targets.numpy()[0]
-            val_targets = bc_util.decode_ref(bc_util.remove_trailing(val_targets, 0), ALPHABET)
+            val_targets = "".join({1: "A", 2: "C", 3: "G", 4: "T"}[i] for i in val_targets if i in {1: "A", 2: "C", 3: "G", 4: "T"})
             target_list.append(val_targets)
         target_list = str(target_list)
         

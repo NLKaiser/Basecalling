@@ -6,10 +6,9 @@ class HMM:
     Example usage:
     batch_size = 32
     time_ = 834
-    num_labels = 5 # blank, A, C, G, T
+    num_labels = 21 # blank, A, C, G, T
     min_num_labels = 350
     max_num_labels = 500
-    blank_index = 0
     
     def generate_row():
         length = tf.random.uniform(shape=[], minval=min_num_labels, maxval=max_num_labels+1, dtype=tf.int32)  # Random length
@@ -22,11 +21,11 @@ class HMM:
     label_length = tf.reduce_sum(tf.cast(labels != 0, tf.int32), axis=1)
     logit_length = tf.shape(logits)[1] * tf.ones(tf.shape(logits)[0], dtype=tf.int32)
     
-    H = HMM(batch_size, max_num_labels, time_, blank_index, -tf.float32.max)
+    H = HMM(batch_size, max_num_labels, time_, -tf.float32.max)
     loss = H(labels, logits, label_length, logit_length)
     """
     
-    def __init__(self, batch_size, padded_label_length, max_time, blank_index, epsilon=-1e6):
+    def __init__(self, batch_size, padded_label_length, max_time, epsilon=-1e6):
         # The batch size
         self.batch_size = batch_size
         # Non dynamic shape of the state dimension
@@ -39,7 +38,13 @@ class HMM:
         
         # Used in the calculation of the expanded labels
         self.n = padded_label_length
-        self.blank_tensor = tf.fill([self.batch_size, self.n + 1], blank_index) # one more blank_index for the end
+        self.lookup = tf.constant([
+                [0,   0,  0,  0,  0],
+                [0,   5,  6,  7,  8],
+                [0,   9, 10, 11, 12],
+                [0,  13, 14, 15, 16],
+                [0,  17, 18, 19, 20]
+            ], dtype=tf.int32)
         
         # Used in the calculation of the transition matrix
         self.A_zero = tf.fill([self.batch_size, self.max_length - 2], 0.0)
@@ -101,6 +106,63 @@ class HMM:
         output = tf.concat([reshaped, self.blank_tensor[:,-1:]], axis=-1)
         
         return output[:, :self.max_length]
+    
+    @tf.function
+    def expand_labels_custom_blank_transitions(self, labels, label_length):
+        
+        # Self-blanks: lookup[labels[i,j], labels[i,j]]
+        indices_self = tf.stack([labels, labels], axis=-1)  # (batch_size, padded_label_length, 2)
+        self_blanks = tf.gather_nd(self.lookup, indices_self)    # (batch_size, padded_label_length)
+        
+        # Transition blanks: lookup[labels[i,j-1], labels[i,j]]
+        labels_prev = tf.concat([labels[:, :1], labels[:, :-1]], axis=1)  # Shift right, repeat first
+        indices_trans = tf.stack([labels_prev, labels], axis=-1)          # (batch_size, padded_label_length, 2)
+        transition_blanks_full = tf.gather_nd(self.lookup, indices_trans)      # (batch_size, padded_label_length)
+        
+        # For each j from 0 to padded_label_length, select the appropriate blank
+        j_range = tf.range(self.n + 1)                      # [0, 1, ..., padded_label_length]
+        j_exp = tf.expand_dims(j_range, 0)                               # (1, padded_label_length + 1)
+        label_length_exp = tf.expand_dims(label_length, 1)               # (batch_size, 1)
+        
+        # Conditions
+        is_start = tf.equal(j_exp, 0)                                    # j == 0
+        is_transition = tf.logical_and(tf.greater(j_exp, 0), tf.less(j_exp, label_length_exp))  # 0 < j < k_i
+        is_end = tf.equal(j_exp, label_length_exp)                       # j == k_i
+        
+        # Compute blanks
+        blanks = tf.where(
+            is_start,
+            self_blanks[:, 0:1],  # At j=0, use lookup[labels[i,0], labels[i,0]]
+            tf.where(
+                is_transition,
+                tf.gather(transition_blanks_full, j_range, axis=1),  # For 0 < j < k_i, use transitions
+                tf.where(
+                    is_end,
+                    tf.gather(self_blanks, label_length - 1, axis=1, batch_dims=1)[:, tf.newaxis],  # At j=k_i
+                    tf.zeros([self.batch_size, self.n + 1], dtype=tf.int32)
+                )
+            )
+        )  # Shape: (batch_size, padded_label_length + 1)
+        
+        # Positions in expanded sequence
+        m_range = tf.range(self.max_length)  # [0, 1, ..., 2*padded_label_length]
+        is_blank_pos = tf.equal(m_range % 2, 0)  # True for even positions
+        blank_indices = m_range // 2             # j = m // 2
+        label_indices = (m_range - 1) // 2       # k = (m - 1) // 2
+        
+        # Gather blanks and labels
+        blanks_expanded = tf.gather(blanks, blank_indices, axis=1)    # (batch_size, max_expanded_length)
+        labels_expanded = tf.gather(labels, label_indices, axis=1)    # (batch_size, max_expanded_length)
+        
+        # Interleave blanks and labels
+        expanded = tf.where(is_blank_pos, blanks_expanded, labels_expanded)
+        
+        # Mask positions beyond 2*k_i + 1
+        expanded_length = 2 * label_length + 1
+        mask = tf.sequence_mask(expanded_length, self.max_length, dtype=tf.bool)
+        expanded = tf.where(mask, expanded, tf.zeros_like(expanded))
+        
+        return expanded
     
     @tf.function
     def build_sparse_transition_matrix(self, expanded_labels):
@@ -293,8 +355,8 @@ class HMM:
         # Calculate matrices
         reversed_labels = self.reverse_labels(labels, label_length)
         expanded_label_length = 2 * label_length + 1
-        expanded_labels = self.expand_labels(labels)
-        expanded_reversed_labels = self.expand_labels(reversed_labels)
+        expanded_labels = self.expand_labels_custom_blank_transitions(labels, label_length)
+        expanded_reversed_labels = self.expand_labels_custom_blank_transitions(reversed_labels, label_length)
         A_sparse = self.build_sparse_transition_matrix(expanded_labels)
         A_sparse_beta = self.build_sparse_transition_matrix(expanded_reversed_labels)
         UB = self.build_UB_matrix(logits, expanded_labels)
@@ -309,7 +371,7 @@ class HMM:
         Decode the model output. Greedy strategy using the class with the maximum value. Repeated characters are collapsed. Blanks are removed.
         
         Args:
-            logits ((batch_size, time_steps, 5)): The model output.
+            logits ((batch_size, time_steps, 21)): The model output.
         
         Returns:
             List ((batch_size)): The DNA sequences as strings.
@@ -346,8 +408,8 @@ class HMM:
         # Calculate matrices
         reversed_labels = self.reverse_labels(labels, label_length)
         expanded_label_length = 2 * label_length + 1
-        expanded_labels = self.expand_labels(labels)
-        expanded_reversed_labels = self.expand_labels(reversed_labels)
+        expanded_labels = self.expand_labels_custom_blank_transitions(labels, label_length)
+        expanded_reversed_labels = self.expand_labels_custom_blank_transitions(reversed_labels, label_length)
         A_sparse = self.build_sparse_transition_matrix(expanded_labels)
         A_sparse_beta = self.build_sparse_transition_matrix(expanded_reversed_labels)
         UB = self.build_UB_matrix(logits, expanded_labels)

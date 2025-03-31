@@ -93,6 +93,10 @@ class HMM:
         # Used in the calculation of the loss
         # Create a batch index tensor: [0, 1, ..., batch_size-1]
         self.batch_indices = tf.range(self.batch_size, dtype=tf.int32)  # Shape: (batch_size,)
+        
+        # Decoding
+        pattern = ["", "A", "C", "G", "T"]
+        self.index_to_char = {i: pattern[i % len(pattern)] for i in range(1024 * len(pattern))}
     
     @tf.function
     def create_crf_indices(self, labels):
@@ -570,6 +574,24 @@ class HMM:
             return grad_stay, grad_move, None, None
         
         return loss, grad
+    
+    def decode(self, logits):
+        """
+        Decode the model output. Greedy strategy using the class with the maximum value. Multiples of five are not considered.
+        
+        Args:
+            logits ((batch_size, time_steps, 5120)): The model output.
+        
+        Returns:
+            List ((batch_size)): The DNA sequences as strings.
+        """
+        # Greedy decoding
+        indices = tf.argmax(logits, axis=-1)
+        indices = indices.numpy()
+        
+        decoded = ["".join(self.index_to_char[i] for i in row if i in self.index_to_char)
+        for row in indices]
+        return decoded
     
     @tf.function
     def __call__(self, labels, logits, label_length, input_length):

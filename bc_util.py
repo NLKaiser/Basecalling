@@ -51,12 +51,6 @@ class LinearDecayScheduler(tf.keras.optimizers.schedules.LearningRateSchedule):
 
         return decayed_learning_rate
 
-def decode_ref(encoded, labels):
-    """
-    Convert a integer encoded reference into a string and remove blanks
-    """
-    return ''.join(labels[e] for e in encoded.tolist() if e)
-
 def parasail_to_sam(result, seq):
     """
     Extract reference start and sam compatible cigar string.
