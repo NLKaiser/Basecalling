@@ -6,7 +6,8 @@ class HMM:
     Example usage:
     batch_size = 32
     time_ = 834
-    num_labels = 21 # blank, A, C, G, T
+    num_classes = 21
+    num_labels = 4 # A, C, G, T
     min_num_labels = 350
     max_num_labels = 500
     
@@ -17,7 +18,7 @@ class HMM:
         return tf.concat([values, padding], axis=0)  # Combine values and padding
     # Generate the tensor
     labels = tf.stack([generate_row() for _ in range(batch_size)])
-    logits = tf.random.uniform((batch_size, time_, num_labels), minval=-5, maxval=5)
+    logits = tf.random.uniform((batch_size, time_, num_classes), minval=-5, maxval=5)
     label_length = tf.reduce_sum(tf.cast(labels != 0, tf.int32), axis=1)
     logit_length = tf.shape(logits)[1] * tf.ones(tf.shape(logits)[0], dtype=tf.int32)
     
@@ -48,6 +49,10 @@ class HMM:
         
         # Used in the calculation of the transition matrix
         self.A_zero = tf.fill([self.batch_size, self.max_length - 2], 0.0)
+        # Build a fixed mask for the second dimension:
+        mask = tf.constant([False if i % 2 == 0 else True for i in range(self.max_length-2)], dtype=tf.bool)
+        # Tile the mask over the batch dimension:
+        self.blank_mask = tf.tile(tf.expand_dims(mask, axis=0), [self.batch_size, 1])
         
         # Used in the calculation of alpha
         self.initial_distribution = self.build_initial_distribution_matrix()
@@ -181,6 +186,8 @@ class HMM:
         comparison = tf.not_equal(expanded_labels[:, :-2], expanded_labels[:, 2:])
         # A in log space
         A = tf.where(comparison, self.A_zero, self.epsilon)
+        # Make blank transitions invalid
+        A = tf.where(self.blank_mask, A, self.epsilon)
         return A
     
     @tf.function
