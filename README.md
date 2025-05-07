@@ -11,3 +11,5 @@ Training:
 
 Visualise training statistics:  
 ```python plot_training.py```
+
+This project is currently under active development and regularly updated.
