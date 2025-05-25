@@ -348,7 +348,6 @@ class HMM:
         logits = tf.nn.log_softmax(logits, axis=-1)
     
         A = self.middle_HMM_transition_matrix(transitions)
-        tf.print(A)
         logits_posteriors = self.logits_posteriors(logits, A)
         
         return logits_posteriors
