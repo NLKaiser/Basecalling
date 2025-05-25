@@ -2,8 +2,10 @@ import numpy as np
 import tensorflow as tf
 
 """
-Base case of the CTC_HMM. Used with 5 classes (blank, A, C, G, T).
-The alpha_loss and beta_loss are the same as tf.nn.ctc_loss.
+Special case of the CTC_HMM. Labels are encoded as 5mers. There is a blank for every
+5mer and every possible transition from it. The expanded labels begin with index 0 and end with
+index 5121. Every 5mer has index 1, 6, 11, 16, 21, 26, .... The blanks are the positions inbetween that.
+The logits must therefore have 5122 classes.
 """
 
 class HMM:
@@ -12,10 +14,10 @@ class HMM:
     Example usage:
     batch_size = 32
     time_ = 834
+    num_classes = 5122
     num_labels = 5 # blank, A, C, G, T
     min_num_labels = 350
     max_num_labels = 500
-    blank_index = 0
     
     def generate_row():
         length = tf.random.uniform(shape=[], minval=min_num_labels, maxval=max_num_labels+1, dtype=tf.int32)  # Random length
@@ -24,19 +26,19 @@ class HMM:
         return tf.concat([values, padding], axis=0)  # Combine values and padding
     # Generate the tensor
     labels = tf.stack([generate_row() for _ in range(batch_size)])
-    logits = tf.random.uniform((batch_size, time_, num_labels), minval=-5, maxval=5)
+    logits = tf.random.uniform((batch_size, time_, num_classes), minval=-5, maxval=5)
     label_length = tf.reduce_sum(tf.cast(labels != 0, tf.int32), axis=1)
     logit_length = tf.shape(logits)[1] * tf.ones(tf.shape(logits)[0], dtype=tf.int32)
     
-    H = HMM(batch_size, max_num_labels, time_, blank_index, -tf.float32.max)
+    H = HMM(batch_size, max_num_labels, time_, -tf.float32.max)
     loss = H(labels, logits, label_length, logit_length)
     """
     
-    def __init__(self, batch_size, padded_label_length, max_time, blank_index, epsilon=-1e6):
+    def __init__(self, batch_size, padded_label_length, max_time, epsilon=-1e6):
         # The batch size
         self.batch_size = batch_size
         # Non dynamic shape of the state dimension
-        self.max_length = 2 * padded_label_length + 1
+        self.max_length = 2 * (padded_label_length - 4) + 1
         # Non dynamic shape of alphas time dimension
         self.max_time = max_time
         
@@ -45,7 +47,6 @@ class HMM:
         
         # Used in the calculation of the expanded labels
         self.n = padded_label_length
-        self.blank_tensor = tf.fill([self.batch_size, self.n + 1], blank_index) # one more blank_index for the end
         
         # Used in the calculation of the transition matrix
         self.A_zero = tf.fill([self.batch_size, self.max_length - 2], 0.0)
@@ -62,7 +63,19 @@ class HMM:
         self.batch_indices = tf.range(self.batch_size, dtype=tf.int32)  # Shape: (batch_size,)
         
         # Decoding
-        self.index_to_char = {1: "A", 2: "C", 3: "G", 4: "T"}
+        # Define the bases
+        bases = ['A', 'C', 'G', 'T']
+        
+        # Generate all possible 5-lets using recursion
+        def generate_combinations(length, current=""):
+            if length == 0:
+                return [current]
+            return [combo for b in bases for combo in generate_combinations(length - 1, current + b)]
+        
+        five_lets = generate_combinations(5)
+        
+        # Map indices 1, 6, 11, ..., 5116 to 5-lets
+        self.index_to_5let = {5 * i + 1: five_lets[i] for i in range(len(five_lets))}
     
     def build_initial_distribution_matrix(self):
         """
@@ -77,22 +90,51 @@ class HMM:
         return initial_distribution
     
     @tf.function
-    def expand_labels(self, labels):
+    def expand_labels(self, labels, expanded_label_length):
         """
-        The labels with blanks in between them. A blank character is also at the start and at the end.
+        Labels are encoded as 5mers. There is a blank for every
+5mer and every possible transition from it. The expanded labels begin with index 0 and end with
+index 5121. Every 5mer has index 1, 6, 11, 16, 21, 26, .... The blanks are the positions inbetween that.
         
         Args:
             labels ((batch_size, padded_label_length)): The labels to predict during training.
+            expanded_label_length ((batch_size)): Lengths of the expanded labels.
         
         Returns:
             Tensor ((batch_size, max_length)): Labels with blanks in between, including the front and end.
         """
-        # Interleave and reshape
-        interleaved = tf.stack([self.blank_tensor[:,:-1], labels], axis=-1) # slice to avoid last blank_index
-        reshaped = tf.reshape(interleaved, [self.batch_size, self.n * 2])
-        # Add the last blank_index at the end
-        output = tf.concat([reshaped, self.blank_tensor[:,-1:]], axis=-1)
-        return output[:, :self.max_length]
+        labels = tf.clip_by_value(labels - 1 , 0, 5)
+        frames = tf.signal.frame(labels, frame_length=5, frame_step=1, axis=1)
+        exponents = tf.range(5 - 1, -1, -1, dtype=tf.int32)
+        # Compute n_base ** exponents
+        powers = tf.pow(4, exponents)
+        encoded = tf.reduce_sum(frames * powers, axis=-1) * 5
+        encoded = encoded + 1
+        labels = labels + 1
+        blanks = encoded[:, :-1] + labels[:, 5:]
+        blanks = tf.concat([blanks, tf.fill([self.batch_size, 1], 5121)], axis=1)
+        
+        # Stack encoded and blanks to pair them: shape becomes (batch_size, n, 2)
+        interleaved = tf.stack([encoded, blanks], axis=2)
+        
+        # Reshape to interleave them: shape becomes (batch_size, 2 * n)
+        interleaved = tf.reshape(interleaved, [self.batch_size, -1])
+        
+        # Create a tensor of zeros with shape (batch_size, 1)
+        zeros = tf.zeros([self.batch_size, 1], dtype=tf.int32)
+        
+        # Concatenate zeros with the interleaved tensor along the sequence axis
+        output = tf.concat([zeros, interleaved], axis=1)
+        
+        # Step 4: Create a mask for valid positions
+        mask = tf.sequence_mask(expanded_label_length - 1, maxlen=self.max_length, dtype=tf.bool)
+        
+        # Step 5: Define the special padding index (not used in encoding)
+        special_index = 5121
+        
+        # Step 6: Keep valid positions as-is, replace the rest with 5121
+        output = tf.where(mask, output, special_index)
+        return output
     
     @tf.function
     def build_sparse_transition_matrix(self, expanded_labels):
@@ -145,7 +187,7 @@ class HMM:
         every entry in the batch.
         
         Args:
-            logits ((batch_size, max_time, 5)): Logits in log space.
+            logits ((batch_size, max_time, max_length)): UB in log space.
             A ((batch_size, 3, max_length)): Transition matrix for the diagonals with valid transitions.
             expanded_labels (batch_size, max_length)): Labels with blanks in between, including the front and end.
             expanded_label_length ((batch_size)): Lengths of the expanded labels.
@@ -286,81 +328,13 @@ class HMM:
         return -(prob - l)
     
     @tf.function
-    def middle_HMM_transition_matrix(self, transitions):
-        abc_logits = tf.concat([
-            transitions[:2],                          # [a, b]
-            tf.zeros((1,), dtype=transitions.dtype)  # [0]
-        ], axis=0)                                    # shape (3,)
-        abc_logits = tf.nn.softmax(abc_logits)
-        a = abc_logits[0]
-        b = abc_logits[1]
-        c = abc_logits[2]
-        
-        # build the (d,e) logits as a single Tensor of shape [2]
-        de_logits = tf.stack([
-            transitions[2],                           # d
-            tf.constant(0.0, dtype=transitions.dtype) # e=0
-        ], axis=0)                                   # shape (2,)
-        de_logits = tf.nn.softmax(de_logits)
-        d = de_logits[0]
-        e = de_logits[1]
-        
-        A = tf.stack([[e, d, d, d, d],
-             [a, c, b, b, b],
-             [a, b, c, b, b],
-             [a, b, b, c, b],
-             [a, b, b, b, c]])
-        
-        return tf.math.log(A)
-    
-    @tf.function
-    def logits_posteriors(self, logits, A):
-        alpha = tf.TensorArray(tf.float32, size=self.max_time, clear_after_read=False, element_shape=[self.batch_size, 5])
-        alpha = alpha.write(0, logits[:, 0, :])
-        
-        beta = tf.TensorArray(tf.float32, size=self.max_time, clear_after_read=False, element_shape=[self.batch_size, 5])
-        beta = beta.write(self.max_time-1, tf.zeros((self.batch_size, 5), dtype=tf.float32))
-        
-        for t in range(1, self.max_time):
-            t_b = self.max_time - t - 1
-            prev = alpha.read(t-1)
-            scores = tf.expand_dims(prev, 2) + A[None, :, :]
-            alpha_t = tf.reduce_logsumexp(scores, axis=1) + logits[:, t, :]
-            alpha = alpha.write(t, alpha_t)
-            
-            next_beta = beta.read(t_b + 1)
-            scores = A[None, :, :] + tf.expand_dims(next_beta + logits[:, t_b + 1, :], 1)
-            beta_t = tf.reduce_logsumexp(scores, axis=2)
-            beta = beta.write(t_b, beta_t)
-        
-        alpha = alpha.stack() # = 0 #tf.transpose(alpha.stack(), perm=[1, 0, 2])  # (batch, time, 5)
-        alpha = tf.transpose(alpha, perm=[1, 0, 2])
-        
-        beta = beta.stack()
-        beta = tf.transpose(beta, perm=[1, 0, 2])
-        
-        logZ = tf.reduce_logsumexp(alpha[:, -1, :], axis=-1)
-        
-        return alpha + beta - tf.reshape(logZ, [self.batch_size, 1, 1])
-    
-    @tf.function
-    def get_middle_HMM_logit_posteriors(self, logits, transitions):
-        logits = tf.nn.log_softmax(logits, axis=-1)
-    
-        A = self.middle_HMM_transition_matrix(transitions)
-        tf.print(A)
-        logits_posteriors = self.logits_posteriors(logits, A)
-        
-        return logits_posteriors
-    
-    @tf.function
     def get_y(self, labels, logits, label_length, input_length):
         """
         Get the matrix with posterior probabilities.
         
         Args:
             labels ((batch_size, padded_label_length)): The training labels. Padded with zeros.
-            logits ((batch_size, max_time, 5)): Values for every time step and class (blank, A, C, G, T).
+            logits ((batch_size, max_time, 5122)): Values for every time step and class.
             label_length ((batch_size)): The actual label lengths without the padding.
             input_length ((batch_size)): Number of time steps to be considered.
         
@@ -372,8 +346,8 @@ class HMM:
         logits = tf.math.log(logits)
         
         # Calculate matrices
-        expanded_label_length = 2 * label_length + 1
-        expanded_labels = self.expand_labels(labels)
+        expanded_label_length = 2 * (label_length - 4) + 1
+        expanded_labels = self.expand_labels(labels, expanded_label_length)
         A_sparse = self.build_sparse_transition_matrix(expanded_labels)
         UB = self.build_UB_matrix(logits, expanded_labels)
         alpha, beta = self.calculate_fwd_bwd(UB, A_sparse, expanded_labels, expanded_label_length)
@@ -386,7 +360,7 @@ class HMM:
         Decode the model output. Greedy strategy using the class with the maximum value. Repeated characters are collapsed. Blanks are removed.
         
         Args:
-            logits ((batch_size, time_steps, 5)): The model output.
+            logits ((batch_size, max_time, 5122)): The model output.
         
         Returns:
             List ((batch_size)): The DNA sequences as strings.
@@ -397,10 +371,37 @@ class HMM:
         shifted = tf.pad(indices[:, :-1], [[0, 0], [1, 0]], constant_values=-1)
         mask = tf.not_equal(indices, shifted)
         collapsed = tf.where(mask, indices, tf.fill(tf.shape(indices), -1))
+        condition = (collapsed % 5 != 1) | (collapsed == 0) | (collapsed == 5121)
+        collapsed = tf.where(condition, -1, collapsed)
         collapsed_np = collapsed.numpy()
         
-        decoded = ["".join(self.index_to_char[i] for i in row if i in self.index_to_char)
-        for row in collapsed_np]
+        def decode_batch(tensor):
+            decoded_sequences = []
+            for b in range(tensor.shape[0]):
+                # Get the sequence for this batch element
+                sequence = tensor[b]
+                # Keep only valid tokens (not -1) and map to 5-lets
+                five_let_sequence = [self.index_to_5let[token] for token in sequence if token != -1]
+                decoded_sequences.append(five_let_sequence)
+            return decoded_sequences
+        
+        def reconstruct_sequence(five_let_list):
+            if not five_let_list:
+                return ""
+            # Start with the first 5-let
+            sequence = five_let_list[0]
+            # Add each subsequent 5-let
+            for next_five_let in five_let_list[1:]:
+                # Even if overlap doesn’t match, just append the last base
+                sequence += next_five_let[-1]
+            return sequence
+        
+        # Step 2: Decode to 5-lets
+        decoded_sequences = decode_batch(collapsed_np)
+        
+        # Step 3: Reconstruct final sequences
+        decoded = [reconstruct_sequence(seq) for seq in decoded_sequences]
+        # Or use reconstruct_sequence_no_overlap if you prefer
         return decoded
     
     @tf.function
@@ -410,7 +411,7 @@ class HMM:
         
         Args:
             labels ((batch_size, padded_label_length)): The training labels. Padded with zeros.
-            logits ((batch_size, max_time, 5)): Values for every time step and class (blank, A, C, G, T).
+            logits ((batch_size, max_time, 5122)): Values for every time step and class.
             label_length ((batch_size)): The actual label lengths without the padding.
             input_length ((batch_size)): Number of time steps to be considered.
         
@@ -418,15 +419,20 @@ class HMM:
             loss ((batch_size)): The total loss for every entry in the batch.
         """
         # Prepare inputs
-        logits = tf.nn.log_softmax(logits)
+        logits = tf.nn.softmax(logits)
+        logits = tf.math.log(logits)
         
         # Calculate matrices
-        expanded_label_length = 2 * label_length + 1
-        expanded_labels = self.expand_labels(labels)
+        expanded_label_length = 2 * (label_length - 4) + 1
+        expanded_labels = self.expand_labels(labels, expanded_label_length)
         A_sparse = self.build_sparse_transition_matrix(expanded_labels)
         UB = self.build_UB_matrix(logits, expanded_labels)
         alpha, beta = self.calculate_fwd_bwd(UB, A_sparse, expanded_labels, expanded_label_length)
         #loss_alpha = self.loss_alpha(alpha, expanded_label_length, input_length)
         loss_beta = self.loss_beta(beta)
         loss = self.get_loss(alpha, beta, loss_beta)
+        
+        # Normalise by the label length
+        loss = loss / tf.cast(label_length, dtype=tf.float32)
+        
         return loss

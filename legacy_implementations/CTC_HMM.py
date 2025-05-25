@@ -1,10 +1,4 @@
-import numpy as np
 import tensorflow as tf
-
-"""
-Base case of the CTC_HMM. Used with 5 classes (blank, A, C, G, T).
-The alpha_loss and beta_loss are the same as tf.nn.ctc_loss.
-"""
 
 class HMM:
     
@@ -49,13 +43,12 @@ class HMM:
         
         # Used in the calculation of the transition matrix
         self.A_zero = tf.fill([self.batch_size, self.max_length - 2], 0.0)
-        # Build a fixed mask for the second dimension:
-        mask = tf.constant([False if i % 2 == 0 else True for i in range(self.max_length-2)], dtype=tf.bool)
-        # Tile the mask over the batch dimension:
-        self.blank_mask = tf.tile(tf.expand_dims(mask, axis=0), [self.batch_size, 1])
         
         # Used in the calculation of alpha
         self.initial_distribution = self.build_initial_distribution_matrix()
+        # F_prev has to be padded to the correct length
+        self.subdiagonal_1_padding = tf.fill((self.batch_size, 1), self.epsilon)
+        self.subdiagonal_2_padding = tf.fill((self.batch_size, 2), self.epsilon)
         
         # Used in the calculation of the loss
         # Create a batch index tensor: [0, 1, ..., batch_size-1]
@@ -66,7 +59,7 @@ class HMM:
     
     def build_initial_distribution_matrix(self):
         """
-        The first two entries are 0, the rest is self.epsilon.
+        The first two entries are 1, the rest is 0.
         
         Returns:
             Tensor ((batch_size, max_length)): The start states, either blank or the first actual label.
@@ -75,6 +68,20 @@ class HMM:
         zeros = tf.fill([self.batch_size, self.max_length - 2], self.epsilon)
         initial_distribution = tf.concat([ones, zeros], axis=1)
         return initial_distribution
+    
+    @tf.function
+    def reverse_labels(self, labels, label_length):
+        """
+        Reverse the labels up to the padding positions.
+        
+        Args:
+            labels ((batch_size, padded_label_length)): The labels to predict during training.
+            label_length ((batch_size)): Length of the labels.
+        
+        Returns:
+            Tensor ((batch_size, padded_label_length)): The labels reversed.
+        """
+        return tf.reverse_sequence(labels, label_length, seq_axis=1, batch_axis=0)
     
     @tf.function
     def expand_labels(self, labels):
@@ -92,33 +99,26 @@ class HMM:
         reshaped = tf.reshape(interleaved, [self.batch_size, self.n * 2])
         # Add the last blank_index at the end
         output = tf.concat([reshaped, self.blank_tensor[:,-1:]], axis=-1)
+        
         return output[:, :self.max_length]
     
     @tf.function
     def build_sparse_transition_matrix(self, expanded_labels):
         """
-        Classic transition matrix read from rows to columns. There are only valid transitions on the diagonal,
-        super-diagonal and super-super-diagonal. Only these entries are returned. Transitions are in log space.
+        Only the positions of the transition matrix that lie in the second row below the diagonal
+        are extracted here. These are transitions from one actual label to the next, only if the
+        two labels are not the same.
         
         Args:
             expanded_labels ((batch_size, max_length)): Labels with blanks inserted.
         
         Returns:
-            Tensor ((batch_size, 3, max_length)): The full diagonal contains valid transitions.
-                                                  The full super-diagonal contins valid transitions.
-                                                  On the super-super-diagonal are positions where expanded_labels[j] are not equal to 
-                                                  expanded_labels[j-2].
+            Tensor ((batch_size, max_length)): Positions where expanded_labels[j] are not equal to expanded_labels[j-2].
         """
-        diag = tf.zeros([self.batch_size, self.max_length])
-        super_diag = tf.concat([tf.fill([self.batch_size, 1], self.epsilon), tf.zeros([self.batch_size, self.max_length-1])], axis=-1)
         # Compare expanded_labels[j] and expanded_labels[j-2]
         comparison = tf.not_equal(expanded_labels[:, :-2], expanded_labels[:, 2:])
         # A in log space
-        super2_diag = tf.where(comparison, self.A_zero, self.epsilon)
-        # Make blank transitions invalid
-        super2_diag = tf.where(self.blank_mask, super2_diag, self.epsilon)
-        super2_diag = tf.concat([tf.fill([self.batch_size, 2], self.epsilon), super2_diag], axis=-1)
-        A = tf.stack([diag, super_diag, super2_diag], axis=1)
+        A = tf.where(comparison, self.A_zero, self.epsilon)
         return A
     
     @tf.function
@@ -136,95 +136,83 @@ class HMM:
         expanded_indices = tf.repeat(expanded_labels, self.max_time, axis=0)
         expanded_indices = tf.reshape(expanded_indices, [self.batch_size, self.max_time, self.max_length])
         UB = tf.gather(logits, expanded_indices, axis=2, batch_dims=2)
+        # There is no check for 0 values. In the models used the logits are clipped and then softmaxed,
+        # we do not expect numerical underflow here.
+        # UB in log space
+        UB = tf.math.log(UB)
         return UB
     
     @tf.function
-    def calculate_fwd_bwd(self, UB, A, expanded_labels, expanded_label_length):
+    def reverse_UB(self, UB, expanded_label_length):
+        """
+        Reverse UB along the state and time dimension.
+        
+        Args:
+            UB ((batch_size, max_time, max_length)): Values for every time step and label.
+            expanded_label_length ((batch_size)): Lengths of the expanded labels.
+        
+        Returns:
+            Tensor ((batch_size, max_time, max_length)): UB reversed along the state and time dimension.
+        """
+        UB_reverse = tf.reverse_sequence(UB, expanded_label_length, seq_axis=2, batch_axis=0)
+        UB_reverse = tf.reverse(UB_reverse, axis=[1])
+        return UB_reverse
+    
+    @tf.function
+    def calculate_fwd_bwd(self, A_sparse, A_sparse_beta, UB, UB_beta, expanded_label_length):
         """
         Forward and backward probabilities. Calculated in log space. Calculated over the full range max_time, max_length for
         every entry in the batch.
         
         Args:
-            logits ((batch_size, max_time, 5)): Logits in log space.
-            A ((batch_size, 3, max_length)): Transition matrix for the diagonals with valid transitions.
-            expanded_labels (batch_size, max_length)): Labels with blanks in between, including the front and end.
+            A_sparse ((batch_size, max_length)): Positions where expanded_labels[j] are not equal to expanded_labels[j-2].
+            A_sparse_beta ((batch_size, max_length)): Positions where expanded_labels[j] are not equal to expanded_labels[j-2]. To calculate beta.
+            UB ((batch_size, max_time, max_length)): Values for every time step and label.
+            UB_beta ((batch_size, max_time, max_length)): Values for every time step and label. To calculate beta.
             expanded_label_length ((batch_size)): Lengths of the expanded labels.
         
         Returns:
             alpha ((max_time, batch_size, max_length)): Forward probabilities in log space.
-            beta ((max_time, batch_size, max_length)): Backward probabilities in log space.
+            beta ((max_time, <batch_size, max_length)): Backward probabilities in log space.
         """
-        # alpha init
-        alpha_ta = tf.TensorArray(tf.float32,
-                                  size=self.max_time,
-                                  clear_after_read=False,
-                                  element_shape=[self.batch_size, self.max_length])
-        alpha_ta = alpha_ta.write(0,
-                                  self.initial_distribution +
-                                  UB[:, 0, :])
-        
-        # beta init
-        beta_ta = tf.TensorArray(tf.float32,
-                                 size=self.max_time,
-                                 clear_after_read=False,
-                                 element_shape=[self.batch_size, self.max_length])
-        
-        mask_last = tf.one_hot(expanded_label_length - 1,   self.max_length, dtype=tf.float32)
-        mask_pen  = tf.one_hot(expanded_label_length - 2, self.max_length, dtype=tf.float32)
-        
-        # combine into a 0/1 mask, 1 at the two end-states, 0 elsewhere
-        mask      = tf.minimum(mask_last + mask_pen, 1.0)  
-        
-        # where mask==1 zero; where mask==0 self.epsilon
-        init_beta = (1.0 - mask) * self.epsilon     # shape (B, L)
-        
-        # add UB at T-1
-        beta_ta = beta_ta.write(
-            self.max_time - 1,
-            init_beta + UB[:, self.max_time - 1, :]
-        )
+        # Initialise alpha
+        alpha_ta = tf.TensorArray(tf.float32, size=self.max_time, clear_after_read=False, element_shape=[self.batch_size, self.max_length])
+        alpha_ta = alpha_ta.write(0, self.initial_distribution + UB[:, 0, :])
+        # Initialise beta
+        beta_ta = tf.TensorArray(tf.float32, size=self.max_time, clear_after_read=False, element_shape=[self.batch_size, self.max_length])
+        beta_ta = beta_ta.write(0, self.initial_distribution + UB_beta[:, 0, :])
         
         for t in range(1, self.max_time):
-            t_beta = self.max_time - 1 - t
+            alpha_prev = alpha_ta.read(t-1)
+            beta_prev = beta_ta.read(t-1)
             
-            a_prev = alpha_ta.read(t - 1)
-            b_prev = beta_ta.read(t_beta+1)
+            # Contributions from subdiagonal 1. Pad the first entry of F_prev.
+            subdiagonal_1_alpha = tf.concat([self.subdiagonal_1_padding, alpha_prev[:, :-1]], axis=1)
+            subdiagonal_1_beta = tf.concat([self.subdiagonal_1_padding, beta_prev[:, :-1]], axis=1)
             
-            a_stay   = a_prev + A[:, 0, :]
-            b_stay = b_prev + A[:,0,:]
+            # Contributions from subdiagonal 2
+            subdiagonal_2_alpha = tf.concat([self.subdiagonal_2_padding, alpha_prev[:, :-2] + A_sparse], axis=1)
+            subdiagonal_2_beta = tf.concat([self.subdiagonal_2_padding, beta_prev[:, :-2] + A_sparse_beta], axis=1)
             
-            a_from1  = tf.concat([tf.fill([self.batch_size, 1], self.epsilon),
-                                a_prev[:, :-1]],
-                               axis=1) + A[:, 1, :]
-            b_to1 = tf.concat([
-                b_prev[:,1:] + A[:,1,1:],
-                tf.fill([self.batch_size,1], self.epsilon)
-            ], axis=1)
-                               
-            a_from2  = tf.concat([tf.fill([self.batch_size, 2], self.epsilon),
-                                a_prev[:, :-2]],
-                               axis=1) + A[:, 2, :]
-            b_to2 = tf.concat([
-                b_prev[:,2:] + A[:,2,2:],
-                tf.fill([self.batch_size,2], self.epsilon)
-            ], axis=1)
+            # Combine contributions in log space
+            alpha_current = tf.reduce_logsumexp(
+                [alpha_prev, subdiagonal_1_alpha, subdiagonal_2_alpha],
+                axis=0  # Combine over the 3 contributions
+            ) + UB[:, t, :]  # Add UB for the current time step
+            alpha_ta = alpha_ta.write(t, alpha_current)
             
-            a_t = tf.reduce_logsumexp(
-                [a_stay, a_from1, a_from2], axis=0
-            ) + UB[:, t, :]
-            b_t = tf.reduce_logsumexp([b_stay, b_to1, b_to2], axis=0) + UB[:, t_beta, :]
-            
-            # Mask invalid states that are beyond the label length.
-            valid_length_alpha = tf.minimum(tf.fill([self.batch_size], 2*t+2), expanded_label_length)
-            mask_alpha = tf.sequence_mask(valid_length_alpha, maxlen=self.max_length, dtype=tf.bool)
-            a_t = tf.where(mask_alpha, a_t, self.epsilon)
-            
-            alpha_ta = alpha_ta.write(t, a_t)
-            beta_ta = beta_ta.write(t_beta, b_t)
+            beta_current = tf.reduce_logsumexp(
+                [beta_prev, subdiagonal_1_beta, subdiagonal_2_beta],
+                axis=0
+            ) + UB_beta[:, t, :]
+            beta_ta = beta_ta.write(t, beta_current)
         
-        alpha = alpha_ta.stack()  # (max_time, batch_size, max_length)
-        beta = beta_ta.stack()   # (max_time, batch_size, max_length)
-        
+        # Stack the result
+        alpha = alpha_ta.stack()  # Shape: (max_time, batch_size, max_length)
+        beta = beta_ta.stack()
+        # Reverse beta to get the classic backward matrix
+        beta = tf.reverse_sequence(beta, expanded_label_length, seq_axis=2, batch_axis=1)
+        beta = tf.reverse(beta, axis=[0])
         return alpha, beta
     
     @tf.function
@@ -286,74 +274,6 @@ class HMM:
         return -(prob - l)
     
     @tf.function
-    def middle_HMM_transition_matrix(self, transitions):
-        abc_logits = tf.concat([
-            transitions[:2],                          # [a, b]
-            tf.zeros((1,), dtype=transitions.dtype)  # [0]
-        ], axis=0)                                    # shape (3,)
-        abc_logits = tf.nn.softmax(abc_logits)
-        a = abc_logits[0]
-        b = abc_logits[1]
-        c = abc_logits[2]
-        
-        # build the (d,e) logits as a single Tensor of shape [2]
-        de_logits = tf.stack([
-            transitions[2],                           # d
-            tf.constant(0.0, dtype=transitions.dtype) # e=0
-        ], axis=0)                                   # shape (2,)
-        de_logits = tf.nn.softmax(de_logits)
-        d = de_logits[0]
-        e = de_logits[1]
-        
-        A = tf.stack([[e, d, d, d, d],
-             [a, c, b, b, b],
-             [a, b, c, b, b],
-             [a, b, b, c, b],
-             [a, b, b, b, c]])
-        
-        return tf.math.log(A)
-    
-    @tf.function
-    def logits_posteriors(self, logits, A):
-        alpha = tf.TensorArray(tf.float32, size=self.max_time, clear_after_read=False, element_shape=[self.batch_size, 5])
-        alpha = alpha.write(0, logits[:, 0, :])
-        
-        beta = tf.TensorArray(tf.float32, size=self.max_time, clear_after_read=False, element_shape=[self.batch_size, 5])
-        beta = beta.write(self.max_time-1, tf.zeros((self.batch_size, 5), dtype=tf.float32))
-        
-        for t in range(1, self.max_time):
-            t_b = self.max_time - t - 1
-            prev = alpha.read(t-1)
-            scores = tf.expand_dims(prev, 2) + A[None, :, :]
-            alpha_t = tf.reduce_logsumexp(scores, axis=1) + logits[:, t, :]
-            alpha = alpha.write(t, alpha_t)
-            
-            next_beta = beta.read(t_b + 1)
-            scores = A[None, :, :] + tf.expand_dims(next_beta + logits[:, t_b + 1, :], 1)
-            beta_t = tf.reduce_logsumexp(scores, axis=2)
-            beta = beta.write(t_b, beta_t)
-        
-        alpha = alpha.stack() # = 0 #tf.transpose(alpha.stack(), perm=[1, 0, 2])  # (batch, time, 5)
-        alpha = tf.transpose(alpha, perm=[1, 0, 2])
-        
-        beta = beta.stack()
-        beta = tf.transpose(beta, perm=[1, 0, 2])
-        
-        logZ = tf.reduce_logsumexp(alpha[:, -1, :], axis=-1)
-        
-        return alpha + beta - tf.reshape(logZ, [self.batch_size, 1, 1])
-    
-    @tf.function
-    def get_middle_HMM_logit_posteriors(self, logits, transitions):
-        logits = tf.nn.log_softmax(logits, axis=-1)
-    
-        A = self.middle_HMM_transition_matrix(transitions)
-        tf.print(A)
-        logits_posteriors = self.logits_posteriors(logits, A)
-        
-        return logits_posteriors
-    
-    @tf.function
     def get_y(self, labels, logits, label_length, input_length):
         """
         Get the matrix with posterior probabilities.
@@ -369,14 +289,17 @@ class HMM:
         """
         # Prepare inputs
         logits = tf.nn.softmax(logits)
-        logits = tf.math.log(logits)
         
         # Calculate matrices
+        reversed_labels = self.reverse_labels(labels, label_length)
         expanded_label_length = 2 * label_length + 1
         expanded_labels = self.expand_labels(labels)
+        expanded_reversed_labels = self.expand_labels(reversed_labels)
         A_sparse = self.build_sparse_transition_matrix(expanded_labels)
+        A_sparse_beta = self.build_sparse_transition_matrix(expanded_reversed_labels)
         UB = self.build_UB_matrix(logits, expanded_labels)
-        alpha, beta = self.calculate_fwd_bwd(UB, A_sparse, expanded_labels, expanded_label_length)
+        UB_beta = self.reverse_UB(UB, expanded_label_length)
+        alpha, beta = self.calculate_fwd_bwd(A_sparse, A_sparse_beta, UB, UB_beta, expanded_label_length)
         #loss_alpha = self.loss_alpha(alpha, expanded_label_length, input_length)
         loss_beta = self.loss_beta(beta)
         return alpha + beta - tf.expand_dims(tf.expand_dims(loss_beta, axis=0), axis=-1)
@@ -418,14 +341,18 @@ class HMM:
             loss ((batch_size)): The total loss for every entry in the batch.
         """
         # Prepare inputs
-        logits = tf.nn.log_softmax(logits)
+        logits = tf.nn.softmax(logits)
         
         # Calculate matrices
+        reversed_labels = self.reverse_labels(labels, label_length)
         expanded_label_length = 2 * label_length + 1
         expanded_labels = self.expand_labels(labels)
+        expanded_reversed_labels = self.expand_labels(reversed_labels)
         A_sparse = self.build_sparse_transition_matrix(expanded_labels)
+        A_sparse_beta = self.build_sparse_transition_matrix(expanded_reversed_labels)
         UB = self.build_UB_matrix(logits, expanded_labels)
-        alpha, beta = self.calculate_fwd_bwd(UB, A_sparse, expanded_labels, expanded_label_length)
+        UB_beta = self.reverse_UB(UB, expanded_label_length)
+        alpha, beta = self.calculate_fwd_bwd(A_sparse, A_sparse_beta, UB, UB_beta, expanded_label_length)
         #loss_alpha = self.loss_alpha(alpha, expanded_label_length, input_length)
         loss_beta = self.loss_beta(beta)
         loss = self.get_loss(alpha, beta, loss_beta)

@@ -55,10 +55,12 @@ EPOCHS = 512
 STEPS_PER_EPOCH = int(1000000/BATCH_SIZE)
 CHUNK_LENGTH = 5000
 TARGET_LENGTH = 500
-NUM_CLASSES = 21  # Including padding (0) and base classes (1-4)
+NUM_CLASSES = 5  # Including padding (0) and base classes (1-4)
 
-MODEL_TYPE = CTC_2_HMM.HMM(BATCH_SIZE, 500, 834, epsilon=-tf.float32.max)
-MODEL_VALID_TYPE = CTC_2_HMM.HMM(VALID_BATCH_SIZE, 500, 834, epsilon=-tf.float32.max)
+MODEL_TYPE = CTC_HMM.HMM(BATCH_SIZE, 500, 834, 0, epsilon=-tf.float32.max)
+MODEL_VALID_TYPE = CTC_HMM.HMM(VALID_BATCH_SIZE, 500, 834, 0, epsilon=-tf.float32.max)
+#MODEL_TYPE = CTC_2_HMM.HMM(BATCH_SIZE, 500, 834, epsilon=-tf.float32.max)
+#MODEL_VALID_TYPE = CTC_2_HMM.HMM(VALID_BATCH_SIZE, 500, 834, epsilon=-tf.float32.max)
 #MODEL_TYPE = CTC.CTC()
 #MODEL_VALID_TYPE = CTC.CTC()
 
@@ -93,11 +95,78 @@ def build_model_architecture():
     model = tf.keras.Model(inputs, classes)
     return model
 
+def make_transformer_seq_delta(
+    num_features: int,        # NUM_CLASSES
+    time_steps: int,          # explicitly define T here
+    model_dim: int = 64,
+    num_heads: int = 4,
+    ff_dim: int = 128,
+    num_layers: int = 2,
+    dropout: float = 0.0
+) -> tf.keras.Model:
+    """
+    Takes input of shape (batch, T, C)
+    and produces an output of the same shape: a sequence of per-time-step deltas.
+    """
+    # 1) fixed-length sequence input
+    seq_in = tf.keras.layers.Input(shape=(time_steps, num_features), 
+                          name="posterior_sequence")
+
+    # 2) embed into model_dim
+    x = tf.keras.layers.Dense(model_dim, name="embed_proj")(seq_in)
+
+    # 3) add learned positional embeddings
+    pos_emb = tf.keras.layers.Embedding(input_dim=time_steps,
+                               output_dim=model_dim,
+                               name="pos_emb")
+    # build a position index tensor of shape [1, T]
+    positions = tf.range(start=0, limit=time_steps, delta=1)[tf.newaxis, :]
+    x = x + pos_emb(positions)
+
+    # 4) stack transformer encoder blocks
+    for i in range(num_layers):
+        attn = tf.keras.layers.MultiHeadAttention(
+                    num_heads=num_heads,
+                    key_dim=model_dim // num_heads,
+                    dropout=dropout,
+                    name=f"mha_{i}"
+               )(x, x)
+        x = tf.keras.layers.LayerNormalization(name=f"ln1_{i}")(x + attn)
+
+        ff = tf.keras.layers.Dense(ff_dim, activation="relu", name=f"ff1_{i}")(x)
+        ff = tf.keras.layers.Dense(model_dim, name=f"ff2_{i}")(ff)
+        x = tf.keras.layers.LayerNormalization(name=f"ln2_{i}")(x + ff)
+
+    # 5) project back to C *per time step*
+    delta_seq = tf.keras.layers.Dense(num_features,
+                             activation=None,
+                             name="delta_sequence")(x)
+    
+    delta_seq = layers.ClipLayer(-5, 5)(delta_seq)
+    
+    return tf.keras.Model(seq_in, delta_seq, name="transformer_seq_delta_head")
+
+class ThreeTransitions(tf.keras.layers.Layer):
+    def __init__(self):
+        super().__init__()
+        self.transitions = self.add_weight(
+            name="transitions",
+            shape=(3,),
+            initializer=tf.constant_initializer(value=0.0),
+            trainable=True
+        )
+
+    def call(self, inputs=None):
+        # returns a Tensor, not a Variable
+        return tf.identity(self.transitions)
+
 # Compile and train the model
 class Model(tf.keras.Model):
     def __init__(self, architecture_, type_, valid_type_):
         super(Model, self).__init__()
         self.model_architecture = architecture_
+        self.transitions = ThreeTransitions()
+        self.MLP = make_transformer_seq_delta(NUM_CLASSES, 834, 256, 8, 256, 4)
         self.model_type = type_
         self.model_valid_type = valid_type_
         self.scale = False
@@ -114,6 +183,11 @@ class Model(tf.keras.Model):
             logits = self(chunks, training=True)
             # Time dimension of the models output * batch size
             input_lengths = tf.shape(logits)[1] * tf.ones([tf.shape(chunks)[0]], dtype=tf.int32)
+            
+            # Residual HMM
+            logits_posteriors = self.model_type.get_middle_HMM_logit_posteriors(logits, self.transitions())
+            logits_posteriors_refined = self.MLP(logits_posteriors)
+            logits = (logits + logits_posteriors_refined) / 2
             
             loss = tf.reduce_mean(self.model_type(targets, logits, target_lengths, input_lengths))
             
