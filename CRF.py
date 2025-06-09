@@ -491,7 +491,6 @@ class CRF:
     
     @tf.function(jit_compile=True)
     def __call__(self, scores, targets, target_lengths, normalise_scores=True):
-        tf.profiler.experimental.start('logdir')
         #scores = tf.cast(scores, tf.float32)
         # (N, T, C) -> (T, N, C)
         scores = tf.transpose(scores, perm=(1, 0, 2))
@@ -500,5 +499,4 @@ class CRF:
         stay_scores, move_scores = self.prepare_ctc_scores(scores, targets)
         logz = self.LogZ(stay_scores, move_scores, target_lengths + 1 - self.state_len)
         loss = - (logz / tf.cast(target_lengths, self.dtype))
-        tf.profiler.experimental.stop()
         return loss
