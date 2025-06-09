@@ -177,3 +177,107 @@ class LinearCRFEncoder(tf.keras.layers.Layer):
             scores = tf.reshape(scores, [T, N, -1])
         
         return scores
+
+class ThreeTransitions(tf.keras.layers.Layer):
+    def __init__(self):
+        super().__init__()
+        self.transitions = self.add_weight(
+            name="transitions",
+            shape=(3,),
+            initializer=tf.constant_initializer(value=0.0),
+            trainable=True
+        )
+
+    def call(self, inputs=None):
+        # returns a Tensor, not a Variable
+        return tf.identity(self.transitions)
+
+class RES_HMM(tf.keras.layers.Layer):
+    def __init__(self, num_layers=1, num_lstms=2, embed_dim=512, **kwargs):
+        super(RES_HMM, self).__init__(**kwargs)
+        self.num_layers = num_layers
+        self.num_lstms = num_lstms
+        
+        self.conv1 = tf.keras.layers.Conv1D(64, kernel_size=5, activation='swish', padding='same', use_bias=True)
+        self.bn1 = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.1, epsilon=1e-5)
+        self.conv2 = tf.keras.layers.Conv1D(64, kernel_size=5, activation='swish', padding='same', use_bias=True)
+        self.bn2 = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.1, epsilon=1e-5)
+        self.conv3 = tf.keras.layers.Conv1D(384, kernel_size=19, strides=6, activation='tanh', padding='same', use_bias=True)
+        self.bn3 = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.1, epsilon=1e-5)
+        
+        self.lstms = [
+            [
+                tf.keras.layers.Bidirectional(tf.keras.layers.LSTM(256, return_sequences=True))
+                for _ in range(num_lstms)
+            ]
+            for _ in range(num_layers)
+        ]
+        self.embed = tf.keras.layers.Dense(embed_dim, use_bias=False, dtype=tf.float32)
+        self.unembed = tf.keras.layers.Dense(5, use_bias=False, dtype=tf.float32)
+
+        # Use lists of layers but register them with setattr for Keras tracking
+        self.layer_norms = []
+        self.reduces = []
+        self.transitions = []
+        self.expands = []
+        self.mlps = []
+
+        for l in range(num_layers):
+            ln = tf.keras.layers.LayerNormalization(axis=-1, epsilon=1e-12)
+            self.layer_norms.append(ln)
+            self.__setattr__(f'layer_norm_{l}', ln)
+
+            reduce = tf.keras.layers.Dense(5, use_bias=False, dtype=tf.float32)
+            self.reduces.append(reduce)
+            self.__setattr__(f'reduce_{l}', reduce)
+
+            transition = ThreeTransitions()  # Assuming this is a Keras Layer
+            self.transitions.append(transition)
+            self.__setattr__(f'transition_{l}', transition)
+
+            expand = tf.keras.layers.Dense(embed_dim, use_bias=False, dtype=tf.float32)
+            self.expands.append(expand)
+            self.__setattr__(f'expand_{l}', expand)
+
+            mlp = tf.keras.layers.Dense(embed_dim, activation="relu", use_bias=True, dtype=tf.float32)
+            self.mlps.append(mlp)
+            self.__setattr__(f'mlp_{l}', mlp)
+
+        # Final layer norm
+        final_ln = tf.keras.layers.LayerNormalization(axis=-1, epsilon=1e-12)
+        self.layer_norms.append(final_ln)
+        self.__setattr__(f'layer_norm_{num_layers}', final_ln)
+        
+    def __call__(self, inputs, hmm):
+        x = self.conv1(inputs)
+        x = self.bn1(x)
+        x = self.conv2(x)
+        x = self.bn2(x)
+        x = self.conv3(x)
+        x = self.bn3(x)
+        x = self.embed(x)
+        for l in range(self.num_layers):
+            norm = self.layer_norms[l](x)
+            y = norm
+            for lstm in range(self.num_lstms):
+                y = self.lstms[l][lstm](y)
+            
+            y_reduced = self.reduces[l](y)
+            y_hmm = hmm.get_middle_HMM_logit_posteriors(y_reduced, self.transitions[l]())
+            y_posteriors_expanded = self.expands[l](y_hmm)
+            
+            y_mlp = self.mlps[l](y)
+            
+            x = x + (y_posteriors_expanded * y_mlp)
+        x = self.layer_norms[-1](x)
+        x = self.unembed(x)
+        return x
+
+class RESHMMModel(tf.keras.Model):
+    def __init__(self, num_layers=1, num_lstms=2, embed_dim=512):
+        super().__init__()
+        self.res_hmm = RES_HMM(num_layers=num_layers, num_lstms=num_lstms, embed_dim=embed_dim)
+    
+    def call(self, inputs, hmm, training=True):
+        inputs = tf.expand_dims(inputs, axis=-1)
+        return self.res_hmm(inputs, hmm=hmm)
